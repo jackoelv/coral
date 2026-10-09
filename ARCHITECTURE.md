@@ -4,7 +4,7 @@
 范围：链下网体结算。Foundry / Solidity 0.8.28。  
 源码：`src/CoralIdo.sol`、`src/CoralRewards.sol`、`src/CoralToken.sol`、`src/FreeDaoNFT.sol`、`src/network/CoralNetworks.sol`
 
-主网脚本已按 chainid `56` 配好，但没有 `ALLOW_MAINNET=true` 不会广播。主网仍需要外部审计。[SECURITY-AUDIT.md](SECURITY-AUDIT.md) 写的是上一版链上遍历模块，不覆盖本结构。
+主网脚本已按 chainid `56` 配好，但没有 `ALLOW_MAINNET=true` 不会广播。主网仍需要外部审计。
 
 ---
 

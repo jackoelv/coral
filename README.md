@@ -2,7 +2,7 @@
 
 金库只做入金、邀请、直推、铸币和导入。网体奖在链下按经典极差实时算进 Postgres，大约每 24 小时更新一次 Merkle root。用户自己提现时，合约才转出这笔网体奖。没有实时垫付。
 
-完整结构见 [ARCHITECTURE.md](ARCHITECTURE.md) 和 [FUNCTIONAL-REPORT.md](FUNCTIONAL-REPORT.md)。当前审计见 [SECURITY-AUDIT-2026-09-24-R6.md](SECURITY-AUDIT-2026-09-24-R6.md)；[SECURITY-AUDIT.md](SECURITY-AUDIT.md) 是上一版「链上遍历发奖」的内部审查，不是本结构的修复声明。主网仍需要外部审计，本期不广播主网。
+完整结构见 [ARCHITECTURE.md](ARCHITECTURE.md) 和 [FUNCTIONAL-REPORT.md](FUNCTIONAL-REPORT.md)。内部安全审计报告只在本地保存，不放进公开仓库。主网仍需要外部审计，本期不广播主网。
 
 仓库是独立 Foundry 项目。网站整合为后续工作。`CoralIdo.claim()` 只领 **USDT 直推**。网体奖走 `CoralRewards`。
 
@@ -126,9 +126,7 @@ IDO_ADDRESS=0x... RPC_URL=... TEST_PRIVATE_KEY=0x... \
 
 ## 安全
 
-当前版本的内部审计：[SECURITY-AUDIT-2026-09-24-R6.md](SECURITY-AUDIT-2026-09-24-R6.md)（0 高 / 1 中 / 4 低，Owner 权限列为已知并接受；复现在 `test/audit/AuditPoc.t.sol` 和 `test/audit/AuditPocR5.t.sol`，真实数据库端到端测试 `npm run e2e:postgres`）。功能说明：[FUNCTIONAL-REPORT.md](FUNCTIONAL-REPORT.md)。
-
-[SECURITY-AUDIT.md](SECURITY-AUDIT.md) 审查的是已经删掉的链上团队模块，不要把它读成「本版已修复」。主网部署前需要外部审计。
+内部审计报告和复现测试只在本地保存，不放进公开仓库。真实数据库端到端测试：`npm run e2e:postgres`。功能说明：[FUNCTIONAL-REPORT.md](FUNCTIONAL-REPORT.md)。主网部署前需要外部审计。
 
 历史第一期笔记在本地知识库 `source/notes/nemoido-mainnet-2026-10-06/SECURITY.md`（口径已过时）。
 

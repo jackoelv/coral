@@ -3,7 +3,7 @@
 日期：2026-09-24（第五版，链下修复并用真实 Postgres 验证之后）  
 代码状态：提交 `11e8efd` 加上工作区全部未提交改动（分支 `localdev`）  
 范围：`src/` 下全部合约、`script/Deploy.s.sol`、`scripts/` 下的链下计算、索引、发布、核对、导入和周界脚本  
-配套安全报告：[SECURITY-AUDIT-2026-09-24-R6.md](SECURITY-AUDIT-2026-09-24-R6.md)。R5、R4、R3、R2 和第一版保留为历史
+配套安全报告：只在本地保存，不放进公开仓库
 
 名称：项目与金库写 Coral，凭证写 CKEY，NFT 与周息写 FreeDaoNFT、FreeDaoNFTInterest。下文里仍出现的 `nemo()`、`NemoAllocated`、`nemo_*` 表、`NEMO_*` 变量和 `nemo-sim` 前缀，是链上选择器、已有表和导入算法的原名，没有改成另一套名字。
 
@@ -115,7 +115,7 @@ flowchart LR
 | `publishRoot(root, contentHash, cumulative, uri)` | publisher 或 Owner | 立即生效。要求 `root ≠ 0`、`cumulative ≥ totalTeamPaid`、`totalDirectAccrued + cumulative ≤ 25% 帽`。设置了 `maxRootIncrease` 时，还要求 `cumulative ≤ committed + maxRootIncrease`。`uri` 指向公开明细 |
 | `claim(cumulative, proof)` | 用户 | 验证叶子，支付 `cumulative − claimed[用户]`，再检查一次 25% 帽，然后由金库转出 |
 | `setPublisher(addr)` | Owner | 更换发布地址。构造时默认等于 Owner |
-| `setMaxRootIncrease(amount)` | Owner | 单次发布允许的最大增量，0 表示不限。**上线前要设置**（安全报告 R6-M1） |
+| `setMaxRootIncrease(amount)` | Owner | 单次发布允许的最大增量，0 表示不限。**上线前要设置** |
 
 **只读：** `merkleRoot`、`contentHash`、`contentUri`、`committed`、`claimed(addr)`、`totalTeamPaid`、`outstanding()`（`committed − totalTeamPaid`）、`rewardCap()`。
 
@@ -280,7 +280,7 @@ sequenceDiagram
 - 档位：500U / 3%、2000U / 5%、1 万 / 7%、3 万 / 9%、6 万 / 10%。
 - 极差：沿上级链向上走，每人拿「自己的档位 − 下面已经发出的最高档位」。入金者自己的档位不参与，从 0 开始算。
 - 6 万平级抽成：链上第一个达到 10% 的人（记为 D）拿到极差以后，再往上找最近的另一个 10% 祖先，给他 D 这笔网体奖的 10%。只做一次，不跳级。
-- 导入的历史业绩只写本人业绩，不计入上级伞下业绩，不产生奖励，也不计入 25% 帽的分母（安全报告 R6-I4，请业务方确认）。
+- 导入的历史业绩只写本人业绩，不计入上级伞下业绩，不产生奖励，也不计入 25% 帽的分母（请业务方确认）。
 
 `scripts/fixtures/team-golden.json` 固定了 ABCD 和平级抽成的标准答案，`npm run test:js` 会对照检查。
 
@@ -332,7 +332,7 @@ sequenceDiagram
 **部署后需要人工做的事**
 
 1. Owner 不是广播账户时，脚本不会调用 `setRewards` 和 `setNftInterest`，需要 Owner 自己调用。
-2. 奖励合约：`setPublisher(专用地址)`、`setMaxRootIncrease(合理值)`。脚本目前不做这两步（R6-M1）。
+2. 奖励合约：`setPublisher(专用地址)`、`setMaxRootIncrease(合理值)`。脚本目前不做这两步。
 3. 各合约转给多签以后，新 Owner 调用 `acceptOwnership`。
 
 ---
@@ -365,7 +365,7 @@ sequenceDiagram
 - 发布前核对金库余额，够不够付出下一期的增量（A-1）。
 - 发布脚本只读取 `PUBLISHER_PRIVATE_KEY`，并且会核对它等于链上的 `publisher()`。
 - 索引从 `START_BLOCK` 开始，默认每 2000 个区块写一次检查点。索引和发布不能同时跑，后启动的那份会跳过。
-- 应急时同时暂停金库和 CKEY，才能挡住周息领取（R6-L3）。
+- 应急时同时暂停金库和 CKEY，才能挡住周息领取。
 
 ---
 

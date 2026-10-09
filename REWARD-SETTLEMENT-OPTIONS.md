@@ -2,7 +2,7 @@
 
 日期：2026-09-20  
 背景：阶段 1–5 已实现「链上实时经典极差 + 6 万平级抽成」。现评估是否改为链下计算 + 链上默克树记录。  
-状态：**仅评估，未改动合约代码。** 架构现状见 [ARCHITECTURE.md](ARCHITECTURE.md)，风险清单见 [SECURITY-AUDIT.md](SECURITY-AUDIT.md)。
+状态：**仅评估，未改动合约代码。** 架构现状见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
 ---
 

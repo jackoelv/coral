@@ -37,3 +37,9 @@ mainnet-run-rehearsal/
 
 # Archived source runtime state; never use for Coral deployment
 legacy-nemo-local/
+
+# Internal audit reports and tests that name database hosts; local only
+SECURITY-AUDIT*.md
+test/audit/
+scripts/lib/mainnet.test.mjs
+scripts/lib/testnet-ops.test.mjs
