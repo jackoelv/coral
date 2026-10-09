@@ -4,10 +4,10 @@ pragma solidity ^0.8.28;
 import {Script, console2} from "../lib/forge-std/src/Script.sol";
 import {MockUSDT} from "../src/MockUSDT.sol";
 import {CoralToken} from "../src/CoralToken.sol";
-import {CoralNFT} from "../src/CoralNFT.sol";
+import {FreeDaoNFT} from "../src/FreeDaoNFT.sol";
 import {CoralIdo} from "../src/CoralIdo.sol";
 import {CoralRewards} from "../src/CoralRewards.sol";
-import {CoralNftInterest} from "../src/CoralNftInterest.sol";
+import {FreeDaoNFTInterest} from "../src/FreeDaoNFTInterest.sol";
 import {CoralNetworks} from "../src/network/CoralNetworks.sol";
 
 /// @notice Deploy vault + rewards for local, bscTestnet, or bscMainnet.
@@ -64,14 +64,14 @@ contract Deploy is Script {
         }
 
         CoralToken nemo = new CoralToken(deployer);
-        CoralNFT nft = new CoralNFT(deployer, "FreeDaoRWA", "FREEDAONFT");
+        FreeDaoNFT nft = new FreeDaoNFT(deployer, "FreeDaoRWA", "FREEDAONFT");
         string memory nftImage = vm.envOr("NFT_IMAGE_URI", string(""));
         if (bytes(nftImage).length != 0) nft.setImageURI(nftImage);
         CoralIdo ido = new CoralIdo(usdtAddr, address(nemo), address(nft), owner, params);
         nemo.setMinter(address(ido));
         nft.setMinter(address(ido));
         CoralRewards rewards = new CoralRewards(address(ido), owner, params);
-        CoralNftInterest interest = new CoralNftInterest(address(ido), owner);
+        FreeDaoNFTInterest interest = new FreeDaoNFTInterest(address(ido), owner);
         nemo.setInterestMinter(address(interest));
         if (owner == deployer) {
             ido.setRewards(address(rewards));
@@ -86,11 +86,11 @@ contract Deploy is Script {
         console2.log("network", network);
         console2.log("USDT", usdtAddr);
         console2.log("CKEY", address(nemo));
-        console2.log("CoralNFT", address(nft));
-        console2.log("CoralNFT image", nft.imageURI());
+        console2.log("FreeDaoNFT", address(nft));
+        console2.log("FreeDaoNFT image", nft.imageURI());
         console2.log("CoralIdo", address(ido));
         console2.log("CoralRewards", address(rewards));
-        console2.log("CoralNftInterest", address(interest));
+        console2.log("FreeDaoNFTInterest", address(interest));
         console2.log("owner", owner);
     }
 }

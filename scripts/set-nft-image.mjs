@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 把测试网 CoralNFT 的共享图片改成 PNG，用来核对 BSCScan 是否只是不收 WebP。
+ * 把测试网 FreeDaoNFT 的共享图片改成 PNG，用来核对 BSCScan 是否只是不收 WebP。
  * 默认只打印。--apply 才用 .env 的 TEST_PRIVATE_KEY 调用 setImageURI。
  * 新图片必须已经能从公网打开，否则浏览器会再记一次失败。
  *

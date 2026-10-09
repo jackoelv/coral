@@ -15,7 +15,7 @@
 | NFT | `0x2a91a91156feb3b82de8bbe976c5b3f0360fb460` |
 | 金库 CoralIdo | `0xc3d351404a64771c6273178b7d234149be881b3a` |
 | 网体奖 CoralRewards | `0x60997ed167e18f5e5318e44ace586b8a45dd8f88` |
-| 周息 CoralNftInterest | `0x5066a7c90909d681cef4cfa731ad3eb76e447f47` |
+| 周息 FreeDaoNFTInterest | `0x5066a7c90909d681cef4cfa731ad3eb76e447f47` |
 | Owner / 当前 publisher | `0x8149a60BC2863DC23B32A75EE89409E20808906a` |
 
 区块浏览器：`https://testnet.bscscan.com/address/<地址>`

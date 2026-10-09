@@ -2,7 +2,7 @@
 
 日期：2026-09-23  
 范围：链下网体结算。Foundry / Solidity 0.8.28。  
-源码：`src/CoralIdo.sol`、`src/CoralRewards.sol`、`src/CoralToken.sol`、`src/CoralNFT.sol`、`src/network/CoralNetworks.sol`
+源码：`src/CoralIdo.sol`、`src/CoralRewards.sol`、`src/CoralToken.sol`、`src/FreeDaoNFT.sol`、`src/network/CoralNetworks.sol`
 
 主网脚本已按 chainid `56` 配好，但没有 `ALLOW_MAINNET=true` 不会广播。主网仍需要外部审计。[SECURITY-AUDIT.md](SECURITY-AUDIT.md) 写的是上一版链上遍历模块，不覆盖本结构。
 
@@ -16,7 +16,7 @@ flowchart TB
   User -->|register / bindReferrer| Vault
   User -->|claim 直推| Vault
   Vault -->|mint tokensPerUsdt| Token[CoralToken]
-  Vault -->|每 500U 一枚| NFT[CoralNFT]
+  Vault -->|每 500U 一枚| NFT[FreeDaoNFT]
   Calc[scripts/index-rewards.mjs] -->|实时写入| DB[(Postgres)]
   DB -->|每24小时 submitRoot| Rewards[CoralRewards]
   User -->|claim cumulative + proof| Rewards
@@ -29,7 +29,7 @@ flowchart TB
 | **CoralIdo** | USDT 金库：邀请、入金、直推、导入、铸 CKEY / NFT。`contribute` 不再沿邀请链循环 |
 | **CoralRewards** | 累计 Merkle 是发奖依据。大约每 24 小时更新一次 root，用户提现时才转出 |
 | **CoralToken** | `ckey / CKEY`。按需 mint，默认禁转 |
-| **CoralNFT** | 灵魂绑定。本人业绩每 500 USDT 一枚 |
+| **FreeDaoNFT** | 灵魂绑定。本人业绩每 500 USDT 一枚 |
 
 链下计算器在 `scripts/lib/team-reward.mjs`，数字锁在 `scripts/fixtures/team-golden.json`。邀请关系留在链上，任何人都能复算。
 
@@ -136,7 +136,7 @@ struct Account {
 
 ---
 
-## 7. CoralToken 与 CoralNFT
+## 7. CoralToken 与 FreeDaoNFT
 
 - CKEY：CAP `1e9 * 1e18`，无预铸。默认禁转；`transferAllowlist` 放行。Owner 也可以 `mint`。
 - NFT：仅金库 `mint(to, count)`，`_update` 禁止非零地址之间的转移。

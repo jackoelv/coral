@@ -2,12 +2,12 @@
 pragma solidity ^0.8.28;
 
 import {CoralIdoBase} from "./helpers/CoralIdoBase.sol";
-import {CoralNFT} from "../src/CoralNFT.sol";
+import {FreeDaoNFT} from "../src/FreeDaoNFT.sol";
 import {IERC4906} from "../lib/openzeppelin-contracts/contracts/interfaces/IERC4906.sol";
 import {Ownable} from "../lib/openzeppelin-contracts/contracts/access/Ownable.sol";
 import {Base64} from "../lib/openzeppelin-contracts/contracts/utils/Base64.sol";
 
-contract CoralNftTest is CoralIdoBase {
+contract FreeDaoNFTTest is CoralIdoBase {
     string constant IMAGE = "https://test.freedao.life/media/nomad/rwa-nft-pass.webp";
     string constant IMAGE_V2 = "ipfs://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi";
 
@@ -57,7 +57,7 @@ contract CoralNftTest is CoralIdoBase {
         _contribute(alice, 1000 * UNIT);
 
         vm.expectEmit(address(nft));
-        emit CoralNFT.ImageURIUpdated(IMAGE_V2);
+        emit FreeDaoNFT.ImageURIUpdated(IMAGE_V2);
         vm.expectEmit(address(nft));
         emit IERC4906.BatchMetadataUpdate(1, 2);
         vm.prank(owner);
@@ -75,13 +75,13 @@ contract CoralNftTest is CoralIdoBase {
 
     function test_rejectsImageThatBreaksJson() public {
         vm.startPrank(owner);
-        vm.expectRevert(CoralNFT.InvalidImageURI.selector);
+        vm.expectRevert(FreeDaoNFT.InvalidImageURI.selector);
         nft.setImageURI("");
-        vm.expectRevert(CoralNFT.InvalidImageURI.selector);
+        vm.expectRevert(FreeDaoNFT.InvalidImageURI.selector);
         nft.setImageURI('https://x/"a');
-        vm.expectRevert(CoralNFT.InvalidImageURI.selector);
+        vm.expectRevert(FreeDaoNFT.InvalidImageURI.selector);
         nft.setImageURI("https://x/\\a");
-        vm.expectRevert(CoralNFT.InvalidImageURI.selector);
+        vm.expectRevert(FreeDaoNFT.InvalidImageURI.selector);
         nft.setImageURI("https://x/\na");
         vm.stopPrank();
     }
@@ -163,12 +163,12 @@ contract CoralNftTest is CoralIdoBase {
         uint256 id = 1;
         assertEq(nft.ownerOf(id), alice);
         vm.prank(alice);
-        vm.expectRevert(CoralNFT.TransfersLocked.selector);
+        vm.expectRevert(FreeDaoNFT.TransfersLocked.selector);
         nft.transferFrom(alice, bob, id);
         vm.prank(alice);
         nft.approve(bob, id);
         vm.prank(bob);
-        vm.expectRevert(CoralNFT.TransfersLocked.selector);
+        vm.expectRevert(FreeDaoNFT.TransfersLocked.selector);
         nft.transferFrom(alice, bob, id);
     }
 
@@ -183,7 +183,7 @@ contract CoralNftTest is CoralIdoBase {
         nft.setTransfersEnabled(true);
 
         vm.expectEmit(address(nft));
-        emit CoralNFT.TransfersEnabledUpdated(true);
+        emit FreeDaoNFT.TransfersEnabledUpdated(true);
         vm.expectEmit(address(nft));
         emit IERC4906.BatchMetadataUpdate(1, 2);
         vm.prank(owner);
@@ -197,14 +197,14 @@ contract CoralNftTest is CoralIdoBase {
         vm.prank(owner);
         nft.setTransfersEnabled(false);
         vm.prank(bob);
-        vm.expectRevert(CoralNFT.TransfersLocked.selector);
+        vm.expectRevert(FreeDaoNFT.TransfersLocked.selector);
         nft.transferFrom(bob, alice, id);
         assertEq(nft.ownerOf(id), bob);
     }
 
     function test_strangerCannotMint() public {
         vm.prank(alice);
-        vm.expectRevert(CoralNFT.NotAuthorized.selector);
+        vm.expectRevert(FreeDaoNFT.NotAuthorized.selector);
         nft.mint(alice, 1);
     }
 

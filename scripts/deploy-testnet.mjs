@@ -37,7 +37,7 @@ if (apply) {
 const run = JSON.parse(readFileSync(artifact,'utf8'));
 if (Number(run.chain) !== 97) throw new Error('部署记录不是97');
 if (!run.receipts?.length || run.receipts.some(r=>BigInt(r.status)!==1n)) throw new Error('部署中有缺失或失败回执，拒绝同步');
-const names = {CoralToken:'CKEY',CoralNFT:'NFT',CoralIdo:'IDO',CoralRewards:'REWARDS',CoralNftInterest:'INTEREST'};
+const names = {CoralToken:'CKEY',FreeDaoNFT:'NFT',CoralIdo:'IDO',CoralRewards:'REWARDS',FreeDaoNFTInterest:'INTEREST'};
 const updates = {};
 const blocks = [];
 const usdtCreates = run.transactions.filter(t=>t.contractName==='MockUSDT' && t.transactionType==='CREATE');

@@ -13,12 +13,12 @@ interface ICoralVaultSettle {
     function settleTransfer(address from, address to) external;
 }
 
-/// @title CoralNFT
+/// @title FreeDaoNFT
 /// @notice One token per 500 USDT of self volume, minted by the vault.
 ///         Transfers are locked until the owner calls `setTransfersEnabled(true)`.
-///         Weekly yield is paid by CoralNftInterest and follows the current holder.
+///         Weekly yield is paid by FreeDaoNFTInterest and follows the current holder.
 ///         Every token shares one image; the owner can replace its URL at any time.
-contract CoralNFT is ERC721, Ownable2Step, IERC4906 {
+contract FreeDaoNFT is ERC721, Ownable2Step, IERC4906 {
     address public minter;
     uint256 public nextId;
     string public imageURI;

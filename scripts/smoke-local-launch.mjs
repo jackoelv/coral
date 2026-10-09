@@ -11,7 +11,7 @@ if (url.hostname !== '127.0.0.1' || url.protocol !== 'http:') throw new Error('O
 const client = createPublicClient({transport:http(rpc)});
 if (await client.getChainId() !== 31337) throw new Error('Only chain 31337 is allowed');
 const run = JSON.parse(readFileSync('broadcast/Deploy.s.sol/31337/run-latest.json','utf8'));
-const names=['MockUSDT','CoralToken','CoralNFT','CoralIdo','CoralRewards','CoralNftInterest'];
+const names=['MockUSDT','CoralToken','FreeDaoNFT','CoralIdo','CoralRewards','FreeDaoNFTInterest'];
 const contracts=Object.fromEntries(names.map(name=>{
  const tx=run.transactions.find(t=>t.contractName===name && t.transactionType==='CREATE');
  return [name,{address:getAddress(tx.contractAddress),abi:JSON.parse(readFileSync(`out/${name}.sol/${name}.json`,'utf8')).abi}];
@@ -37,15 +37,15 @@ await send('CoralIdo','registerAndContribute',[stringToHex('ROOT0001',{size:32})
 await send('MockUSDT','approve',[contracts.CoralIdo.address,1000n*U],1);
 await send('CoralIdo','registerAndContribute',[stringToHex('BUYER001',{size:32}),stringToHex('ROOT0001',{size:32}),1000n*U],1);
 assert.equal(await read('CoralIdo','totalContributed'),6000n*U);
-assert.equal(await read('CoralNFT','balanceOf',[users[1].address]),2n);
+assert.equal(await read('FreeDaoNFT','balanceOf',[users[1].address]),2n);
 assert.equal(await read('CoralToken','balanceOf',[users[1].address]),100000n*U);
 assert.equal(await read('CoralIdo','pendingOf',[users[0].address]),100n*U);
 await assert.rejects(client.simulateContract({...contracts.CoralIdo,functionName:'contribute',args:[0n],account:users[1]}));
 await send('CoralIdo','claim');
 assert.equal(await read('CoralIdo','pendingOf',[users[0].address]),0n);
 await client.request({method:'anvil_mine',params:['0x3c']});
-assert((await read('CoralNftInterest','pending',[users[1].address]))>0n);
-await send('CoralNftInterest','claim',[],1);
+assert((await read('FreeDaoNFTInterest','pending',[users[1].address]))>0n);
+await send('FreeDaoNFTInterest','claim',[],1);
 const team=50n*U; // 5% of buyer deposit: root qualifies at 5000 before deposit, classic tiers.
 await send('CoralRewards','publishRoot',[leafHash(users[0].address,team),zeroHash,team,'']);
 await send('CoralRewards','claim',[team,[]]);

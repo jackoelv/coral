@@ -5,7 +5,7 @@ import {Test, console2} from "../lib/forge-std/src/Test.sol";
 import {CoralIdo} from "../src/CoralIdo.sol";
 import {CoralNetworks} from "../src/network/CoralNetworks.sol";
 import {CoralToken} from "../src/CoralToken.sol";
-import {CoralNFT} from "../src/CoralNFT.sol";
+import {FreeDaoNFT} from "../src/FreeDaoNFT.sol";
 import {MockUSDT} from "../src/MockUSDT.sol";
 
 /// @notice localdev market-promotion sim. Stops at phase 1: several CoBuilders + 3-tier differential.
@@ -96,7 +96,7 @@ contract SimMarket is Test {
         vm.skip(true, "phase 1: team-reward market sim deferred to phase 4");
         usdt = new MockUSDT();
         nemo = new CoralToken(address(this));
-        CoralNFT pass = new CoralNFT(address(this), "FreeDaoRWA", "FREEDAONFT");
+        FreeDaoNFT pass = new FreeDaoNFT(address(this), "FreeDaoRWA", "FREEDAONFT");
         ido = new CoralIdo(address(usdt), address(nemo), address(pass), address(this), CoralNetworks.local());
         nemo.setMinter(address(ido));
         pass.setMinter(address(ido));

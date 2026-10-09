@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {Ownable} from "../lib/openzeppelin-contracts/contracts/access/Ownable.sol";
 import {CoralIdoBase} from "./helpers/CoralIdoBase.sol";
-import {CoralNFT} from "../src/CoralNFT.sol";
+import {FreeDaoNFT} from "../src/FreeDaoNFT.sol";
 import {CoralToken} from "../src/CoralToken.sol";
 
 /// @notice Owner switches for CKEY and the RWA pass. Both start locked.
@@ -24,7 +24,7 @@ contract TransfersEnabledTest is CoralIdoBase {
         assertEq(nft.ownerOf(id), bob);
 
         vm.prank(bob);
-        vm.expectRevert(CoralNFT.TransfersLocked.selector);
+        vm.expectRevert(FreeDaoNFT.TransfersLocked.selector);
         nft.transferFrom(bob, alice, id);
 
         vm.prank(alice);
@@ -40,7 +40,7 @@ contract TransfersEnabledTest is CoralIdoBase {
         vm.prank(owner);
         nft.setTransfersEnabled(false);
         vm.prank(alice);
-        vm.expectRevert(CoralNFT.TransfersLocked.selector);
+        vm.expectRevert(FreeDaoNFT.TransfersLocked.selector);
         nft.transferFrom(alice, bob, id);
         assertEq(nft.ownerOf(id), alice);
     }

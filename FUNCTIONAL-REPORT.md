@@ -19,8 +19,8 @@
 flowchart LR
   User[用户] -->|register / contribute / claim| Vault[CoralIdo 金库]
   Vault -->|mint 入金所得| Token[CoralToken CKEY]
-  Vault -->|每 500U 一张| NFT[CoralNFT]
-  Vault -->|NFT 变化前 settle| Interest[CoralNftInterest]
+  Vault -->|每 500U 一张| NFT[FreeDaoNFT]
+  Vault -->|NFT 变化前 settle| Interest[FreeDaoNFTInterest]
   User -->|claim 周息| Interest
   Interest -->|mint 周息| Token
   Vault -.事件.-> Indexer[index-rewards.mjs]
@@ -119,7 +119,7 @@ flowchart LR
 
 叶子格式和 OpenZeppelin 一致：`keccak256(bytes.concat(keccak256(abi.encode(地址, 累计额))))`。
 
-### 2.3 CoralNftInterest（NFT 周息）
+### 2.3 FreeDaoNFTInterest（NFT 周息）
 
 继承 `Ownable2Step`、`ReentrancyGuard`。IDO 期间按地址上实际持有的 NFT 张数计算 CKEY 周息，用户自己 `claim()`，合约铸给用户。
 
@@ -170,13 +170,13 @@ flowchart LR
 - `pause` 同时停止转账和铸造。暂停期间入金和领周息都会失败。
 - `rescue` 可以取回误转进来的其他代币，不能取 CKEY 本身。
 
-### 2.5 CoralNFT
+### 2.5 FreeDaoNFT
 
 - 构造参数 `(owner, name, symbol)`。
 - 只有金库能铸，编号自增，逐张铸造。
 - `setMinter` 只能调用一次，之后不能更换铸币地址。
 - 默认不可转。Owner 调用 `setTransfersEnabled(true)` 后持有人之间可以转，再设为 `false` 则重新锁上。铸造不受这个开关影响。周息按当前持有人的 `balanceOf` 计算。
-- 周息由 `CoralNftInterest` 支付，这张合约里没有收益逻辑。
+- 周息由 `FreeDaoNFTInterest` 支付，这张合约里没有收益逻辑。
 
 ### 2.6 CoralNetworks（网络参数）
 
@@ -202,7 +202,7 @@ flowchart LR
 直推领取  CoralIdo.claim()            → 金库转出
 网体领取  CoralRewards.claim()        → vault.disburse → 金库转出
 Owner 提取 withdrawTreasury          ≤ treasuryWithdrawable
-NFT 周息  CoralNftInterest.claim()    → 新铸 CKEY，不动 USDT
+NFT 周息  FreeDaoNFTInterest.claim()    → 新铸 CKEY，不动 USDT
 ```
 
 | 量 | 公式 |
@@ -341,7 +341,7 @@ sequenceDiagram
 
 - 领直推：调用 `CoralIdo.claim()`。
 - 领网体奖：前端从数据库取累计额和 proof，用户调用 `CoralRewards.claim`，自己付 gas。
-- 领 NFT 周息：调用 `CoralNftInterest.claim()`。页面用 `pending(address)` 显示可领数量。
+- 领 NFT 周息：调用 `FreeDaoNFTInterest.claim()`。页面用 `pending(address)` 显示可领数量。
 - root 发布前，页面显示的是预计金额，不能提现。
 
 **管理员**
@@ -373,7 +373,7 @@ sequenceDiagram
 |----|------|
 | Forge | 120 项通过，1 项跳过（SimMarket 大规模模拟）。其中奖励合约 8 项、NFT 周息 14 项、R3 复现 16 项、R5 复现 8 项 |
 | JS | 21 项通过：极差标准答案、Merkle、地址映射、导入树、事件重放、北京时间周界、verify-root、分段扫描、按金库地址建表 |
-| 覆盖率（行 / 分支） | CoralIdo 88.6% / 41.5%；CoralRewards 100% / 53.9%；CoralNftInterest 98.5% / 64.3%；CoralToken 100% / 45.5%；CoralNFT 100% / 42.9% |
+| 覆盖率（行 / 分支） | CoralIdo 88.6% / 41.5%；CoralRewards 100% / 53.9%；FreeDaoNFTInterest 98.5% / 64.3%；CoralToken 100% / 45.5%；FreeDaoNFT 100% / 42.9% |
 | 300 账户 Anvil 实跑（本轮重跑） | 300 个账户、299 笔入金；1000U 入金 gas 深浅链都是 329,747；58 个账户有网体奖，合计 11,507.5U；`publishRoot` 发布后多叶子 proof 领取成功 |
 | 真实 Postgres 端到端（`npm run e2e:postgres`，需要 Docker） | 旧表自动迁移；分段索引 600 条日志；拒绝 `PRIVATE_KEY` 和非 publisher 私钥；先写库再发布；公开文件通过 `verify-root`，改 1 wei 就失败；重复发布仍只有 1 期生效；用库里的 6 层 proof 领到 6U，链上和库里已领金额一致；重复领取被拒；并发锁生效 |
 | NFT 开销 | 每 500U 一张，逐张铸造；6 万 U 单笔约 120 张，此前实测约 341 万 gas |

@@ -9,10 +9,10 @@ import {IERC20} from "../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20
 import {SafeERC20} from "../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {ICoralRewardsView, ICoralVaultPay} from "./ICoralRewards.sol";
-import {ICoralNftInterest} from "./ICoralNftInterest.sol";
+import {IFreeDaoNFTInterest} from "./IFreeDaoNFTInterest.sol";
 import {CoralNetworks} from "./network/CoralNetworks.sol";
 import {CoralToken} from "./CoralToken.sol";
-import {CoralNFT} from "./CoralNFT.sol";
+import {FreeDaoNFT} from "./FreeDaoNFT.sol";
 
 /// @title CoralIdo
 /// @notice Vault for invite links, USDT deposits, direct referral, ckey and NFT.
@@ -47,10 +47,10 @@ contract CoralIdo is Ownable2Step, Pausable, ReentrancyGuard, ICoralVaultPay {
 
     IERC20 public immutable usdt;
     IERC20 public immutable nemo;
-    CoralNFT public immutable nft;
+    FreeDaoNFT public immutable nft;
     bool public immutable weekByBlock;
     /// @notice Length of one vault week. Local counts blocks; testnet counts seconds.
-    ///         Mainnet NFT interest uses the calendar week in `CoralNftInterest` and does not read this.
+    ///         Mainnet NFT interest uses the calendar week in `FreeDaoNFTInterest` and does not read this.
     uint256 public immutable weekDuration;
 
     bool public importFrozen;
@@ -166,7 +166,7 @@ contract CoralIdo is Ownable2Step, Pausable, ReentrancyGuard, ICoralVaultPay {
         if (params.directReferralBps > REWARD_CAP_BPS) revert RewardBpsTooHigh();
         usdt = IERC20(usdt_);
         nemo = IERC20(nemo_);
-        nft = CoralNFT(nft_);
+        nft = FreeDaoNFT(nft_);
         weekByBlock = params.weekByBlock;
         weekDuration = params.weekDuration;
         tokensPerUsdt = params.tokensPerUsdt;
@@ -336,7 +336,7 @@ contract CoralIdo is Ownable2Step, Pausable, ReentrancyGuard, ICoralVaultPay {
         if (saleOpenedAt == 0) {
             saleOpenedAt = block.timestamp;
             saleOpenedBlock = block.number;
-            if (nftInterest != address(0)) ICoralNftInterest(nftInterest).noteSaleOpened();
+            if (nftInterest != address(0)) IFreeDaoNFTInterest(nftInterest).noteSaleOpened();
         }
         emit SaleOpened();
     }
@@ -351,7 +351,7 @@ contract CoralIdo is Ownable2Step, Pausable, ReentrancyGuard, ICoralVaultPay {
         if (idoEnded) revert IdoAlreadyEnded();
         idoEnded = true;
         if (nftInterest != address(0)) {
-            idoEndedWeek = ICoralNftInterest(nftInterest).interestWeek(block.timestamp) + 1;
+            idoEndedWeek = IFreeDaoNFTInterest(nftInterest).interestWeek(block.timestamp) + 1;
         }
         emit IdoEnded(idoEndedWeek);
     }
@@ -458,12 +458,12 @@ contract CoralIdo is Ownable2Step, Pausable, ReentrancyGuard, ICoralVaultPay {
             if (nftInterests[i] == interest_) revert InterestAlreadySet();
         }
         if (n == MAX_NFT_INTERESTS) revert TooManyInterests();
-        if (n != 0) ICoralNftInterest(nftInterests[n - 1]).noteDetached();
+        if (n != 0) IFreeDaoNFTInterest(nftInterests[n - 1]).noteDetached();
         nftInterests.push(interest_);
         nftInterest = interest_;
-        if (saleOpenedAt != 0) ICoralNftInterest(interest_).noteSaleOpened();
+        if (saleOpenedAt != 0) IFreeDaoNFTInterest(interest_).noteSaleOpened();
         if (idoEnded && idoEndedWeek == 0) {
-            idoEndedWeek = ICoralNftInterest(interest_).interestWeek(block.timestamp) + 1;
+            idoEndedWeek = IFreeDaoNFTInterest(interest_).interestWeek(block.timestamp) + 1;
         }
         emit NftInterestUpdated(interest_);
     }
@@ -639,7 +639,7 @@ contract CoralIdo is Ownable2Step, Pausable, ReentrancyGuard, ICoralVaultPay {
     ) internal {
         uint256 n = nftInterests.length;
         for (uint256 i = 0; i < n; i++) {
-            ICoralNftInterest(nftInterests[i]).settle(account);
+            IFreeDaoNFTInterest(nftInterests[i]).settle(account);
         }
     }
 

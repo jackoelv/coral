@@ -5,7 +5,7 @@ import {Test} from "../lib/forge-std/src/Test.sol";
 import {CoralIdo} from "../src/CoralIdo.sol";
 import {CoralNetworks} from "../src/network/CoralNetworks.sol";
 import {CoralToken} from "../src/CoralToken.sol";
-import {CoralNFT} from "../src/CoralNFT.sol";
+import {FreeDaoNFT} from "../src/FreeDaoNFT.sol";
 import {MockUSDT} from "../src/MockUSDT.sol";
 
 contract CoralIdoHandler is Test {
@@ -112,7 +112,7 @@ contract CoralIdoInvariantTest is Test {
     function setUp() public {
         usdt = new MockUSDT();
         nemo = new CoralToken(owner);
-        CoralNFT pass = new CoralNFT(owner, "FreeDaoRWA", "FREEDAONFT");
+        FreeDaoNFT pass = new FreeDaoNFT(owner, "FreeDaoRWA", "FREEDAONFT");
         ido = new CoralIdo(address(usdt), address(nemo), address(pass), owner, CoralNetworks.local());
         nemo.setMinter(address(ido));
         pass.setMinter(address(ido));

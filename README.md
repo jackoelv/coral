@@ -15,7 +15,7 @@ flowchart LR
   User[用户] -->|contribute| Vault[CoralIdo]
   Vault -->|直推即时| User
   Vault -->|mint| Token[CoralToken]
-  Vault -->|每500U| NFT[CoralNFT]
+  Vault -->|每500U| NFT[FreeDaoNFT]
   Indexer[链下计算器] -->|每24小时 publishRoot| Rewards[CoralRewards]
   Rewards -->|disburse| Vault
   Vault -->|USDT| User
@@ -26,8 +26,8 @@ flowchart LR
 | `CoralIdo` | 邀请、入金、直推 10%、CKEY / NFT、导入、金库抽走。不沿邀请链循环 |
 | `CoralRewards` | 累计 Merkle 领取、25% 全局帽、root timelock、押金挑战。不持有奖金 USDT |
 | `CoralToken` | `ckey / CKEY`，CAP **10 亿**，默认禁转，Owner 可开转账白名单 |
-| `CoralNFT` | 每 **500 USDT** 一枚，禁止转让。早期用户的历史张数由管理员 `grantNft` 补发 |
-| `CoralNftInterest` | IDO 期间按持有张数发 Ckey 周息。2/10/20/60 张对应每周 1% / 2% / 2.5% / 3%。用户自己领取 |
+| `FreeDaoNFT` | 每 **500 USDT** 一枚，禁止转让。早期用户的历史张数由管理员 `grantNft` 补发 |
+| `FreeDaoNFTInterest` | IDO 期间按持有张数发 Ckey 周息。2/10/20/60 张对应每周 1% / 2% / 2.5% / 3%。用户自己领取 |
 
 直推 + 已支付网体奖不得超过 `totalContributed` 的 25%（`REWARD_CAP_BPS = 2500`，没有管理员 setter）。
 

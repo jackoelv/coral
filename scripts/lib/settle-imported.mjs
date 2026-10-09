@@ -13,7 +13,7 @@ export function tokensFor(volume, tokensPerUsdt) {
   return (volume * tokensPerUsdt) / UNIT;
 }
 
-/** Beijing Sunday weeks. Same origin as CoralNftInterest. */
+/** Beijing Sunday weeks. Same origin as FreeDaoNFTInterest. */
 export const FIRST_SUNDAY_BEIJING = 230400n;
 export const CALENDAR_WEEK = 7n * 24n * 60n * 60n;
 export const BPS_DENOMINATOR = 10_000n;

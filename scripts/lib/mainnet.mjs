@@ -27,10 +27,10 @@ export const FIXED_ENV = { NETWORK: "bscMainnet", CHAIN_ID: "56", BSC_MAINNET_US
 export const CONTRACT_KEYS = ["CKEY", "NFT", "IDO", "REWARDS", "INTEREST"];
 export const CONTRACT_NAMES = {
   CKEY: "CoralToken",
-  NFT: "CoralNFT",
+  NFT: "FreeDaoNFT",
   IDO: "CoralIdo",
   REWARDS: "CoralRewards",
-  INTEREST: "CoralNftInterest",
+  INTEREST: "FreeDaoNFTInterest",
 };
 export const RECEIPT_CONFIRMATIONS = 3;
 

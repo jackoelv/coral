@@ -41,7 +41,7 @@ if (args.includes('--broadcast')) {
     const live = await client.getTransactionReceipt({hash:receipt.transactionHash});
     check(`receipt.${receipt.transactionHash}`,live.status,'success');
   }
-  for (const [name,key] of [['CoralToken','CKEY'],['CoralNFT','NFT'],['CoralIdo','IDO'],['CoralRewards','REWARDS'],['CoralNftInterest','INTEREST']]) {
+  for (const [name,key] of [['CoralToken','CKEY'],['FreeDaoNFT','NFT'],['CoralIdo','IDO'],['CoralRewards','REWARDS'],['FreeDaoNFTInterest','INTEREST']]) {
     const creates=run.transactions.filter(t=>t.contractName===name && t.transactionType==='CREATE');
     if (creates.length!==1) throw new Error(`${name} 的部署记录必须恰好一条`);
     const tx=creates[0]; const record=creationReceipt(run,tx);

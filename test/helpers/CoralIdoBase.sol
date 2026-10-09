@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import {Test} from "../../lib/forge-std/src/Test.sol";
 import {CoralIdo} from "../../src/CoralIdo.sol";
 import {CoralToken} from "../../src/CoralToken.sol";
-import {CoralNFT} from "../../src/CoralNFT.sol";
+import {FreeDaoNFT} from "../../src/FreeDaoNFT.sol";
 import {CoralNetworks} from "../../src/network/CoralNetworks.sol";
 import {MockUSDT} from "../../src/MockUSDT.sol";
 
@@ -13,7 +13,7 @@ contract CoralIdoBase is Test {
 
     MockUSDT internal usdt;
     CoralToken internal nemo;
-    CoralNFT internal nft;
+    FreeDaoNFT internal nft;
     CoralIdo internal ido;
 
     address internal owner = makeAddr("owner");
@@ -37,7 +37,7 @@ contract CoralIdoBase is Test {
         address usdtToken
     ) internal returns (CoralIdo vault, CoralToken token) {
         token = new CoralToken(owner);
-        nft = new CoralNFT(owner, "FreeDaoRWA", "FREEDAONFT");
+        nft = new FreeDaoNFT(owner, "FreeDaoRWA", "FREEDAONFT");
         vault = new CoralIdo(usdtToken, address(token), address(nft), owner, CoralNetworks.local());
         vm.startPrank(owner);
         token.setMinter(address(vault));

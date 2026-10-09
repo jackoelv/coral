@@ -4,17 +4,17 @@ pragma solidity ^0.8.28;
 import {Test} from "../lib/forge-std/src/Test.sol";
 import {CoralIdoBase} from "./helpers/CoralIdoBase.sol";
 import {CoralIdo} from "../src/CoralIdo.sol";
-import {CoralNFT} from "../src/CoralNFT.sol";
-import {CoralNftInterest} from "../src/CoralNftInterest.sol";
+import {FreeDaoNFT} from "../src/FreeDaoNFT.sol";
+import {FreeDaoNFTInterest} from "../src/FreeDaoNFTInterest.sol";
 import {CoralNetworks} from "../src/network/CoralNetworks.sol";
 import {CoralToken} from "../src/CoralToken.sol";
 
-contract CoralNftInterestTest is CoralIdoBase {
-    CoralNftInterest internal interest;
+contract FreeDaoNFTInterestTest is CoralIdoBase {
+    FreeDaoNFTInterest internal interest;
 
     function setUp() public override {
         super.setUp();
-        interest = new CoralNftInterest(address(ido), owner);
+        interest = new FreeDaoNFTInterest(address(ido), owner);
         vm.startPrank(owner);
         nemo.setInterestMinter(address(interest));
         ido.setNftInterest(address(interest));
@@ -70,7 +70,7 @@ contract CoralNftInterestTest is CoralIdoBase {
         _advanceWeeks(1);
         assertEq(interest.pending(alice), 0);
         vm.prank(alice);
-        vm.expectRevert(CoralNftInterest.NothingToClaim.selector);
+        vm.expectRevert(FreeDaoNFTInterest.NothingToClaim.selector);
         interest.claim();
     }
 
@@ -154,7 +154,7 @@ contract CoralNftInterestTest is CoralIdoBase {
         _register(alice, "ALICE001", "");
         _contribute(alice, 1_000 * UNIT);
         vm.expectEmit(address(interest));
-        emit CoralNftInterest.InterestCapUpdated(500 * UNIT);
+        emit FreeDaoNFTInterest.InterestCapUpdated(500 * UNIT);
         vm.prank(owner);
         interest.setInterestCap(500 * UNIT);
         _advanceWeeks(1);
@@ -168,7 +168,7 @@ contract CoralNftInterestTest is CoralIdoBase {
         _register(alice, "ALICE001", "");
         _contribute(alice, 1_000 * UNIT);
         vm.expectEmit(address(interest));
-        emit CoralNftInterest.AccountCapBpsUpdated(100);
+        emit FreeDaoNFTInterest.AccountCapBpsUpdated(100);
         vm.prank(owner);
         interest.setAccountCapBps(100);
         _advanceWeeks(2);
@@ -184,10 +184,10 @@ contract CoralNftInterestTest is CoralIdoBase {
     }
 
     function test_rejectsBadTiersAndASecondInterestLink() public {
-        CoralNftInterest.Tier[] memory tiers = new CoralNftInterest.Tier[](1);
-        tiers[0] = CoralNftInterest.Tier({minNfts: 2, weeklyBps: 1001});
+        FreeDaoNFTInterest.Tier[] memory tiers = new FreeDaoNFTInterest.Tier[](1);
+        tiers[0] = FreeDaoNFTInterest.Tier({minNfts: 2, weeklyBps: 1001});
         vm.prank(owner);
-        vm.expectRevert(CoralNftInterest.InvalidTiers.selector);
+        vm.expectRevert(FreeDaoNFTInterest.InvalidTiers.selector);
         interest.setTiers(tiers);
 
         vm.prank(owner);
@@ -201,7 +201,7 @@ contract CoralNftInterestTest is CoralIdoBase {
         _contribute(alice, 1_000 * UNIT);
         _advanceWeeks(1);
 
-        CoralNftInterest next = _switchInterest();
+        FreeDaoNFTInterest next = _switchInterest();
         assertTrue(interest.detached());
         assertEq(interest.stopWeek(), ido.currentWeek());
         assertEq(next.startWeek(), interest.stopWeek());
@@ -224,7 +224,7 @@ contract CoralNftInterestTest is CoralIdoBase {
         _register(alice, "ALICE001", "");
         _contribute(alice, 1_000 * UNIT);
         _advanceWeeks(1);
-        CoralNftInterest next = _switchInterest();
+        FreeDaoNFTInterest next = _switchInterest();
 
         _contribute(alice, 4_000 * UNIT);
         assertEq(nft.balanceOf(alice), 10);
@@ -240,9 +240,9 @@ contract CoralNftInterestTest is CoralIdoBase {
         _register(alice, "ALICE001", "");
         _contribute(alice, 1_000 * UNIT);
         _advanceWeeks(1);
-        CoralNftInterest second = _switchInterest();
+        FreeDaoNFTInterest second = _switchInterest();
         _advanceWeeks(1);
-        CoralNftInterest third = _switchInterest();
+        FreeDaoNFTInterest third = _switchInterest();
 
         _contribute(alice, 4_000 * UNIT);
         assertEq(interest.pending(alice), 1_000 * UNIT);
@@ -261,7 +261,7 @@ contract CoralNftInterestTest is CoralIdoBase {
         vm.prank(owner);
         ido.endIdo();
 
-        CoralNftInterest next = _switchInterest();
+        FreeDaoNFTInterest next = _switchInterest();
         _advanceWeeks(3);
         assertEq(interest.pending(alice), 1_000 * UNIT);
         assertEq(next.pending(alice), 0);
@@ -271,14 +271,14 @@ contract CoralNftInterestTest is CoralIdoBase {
         for (uint256 i = 0; i < 7; i++) {
             _switchInterest();
         }
-        CoralNftInterest ninth = new CoralNftInterest(address(ido), owner);
+        FreeDaoNFTInterest ninth = new FreeDaoNFTInterest(address(ido), owner);
         vm.prank(owner);
         vm.expectRevert(CoralIdo.TooManyInterests.selector);
         ido.setNftInterest(address(ninth));
     }
 
-    function _switchInterest() internal returns (CoralNftInterest next) {
-        next = new CoralNftInterest(address(ido), owner);
+    function _switchInterest() internal returns (FreeDaoNFTInterest next) {
+        next = new FreeDaoNFTInterest(address(ido), owner);
         vm.startPrank(owner);
         nemo.setInterestMinter(address(next));
         ido.setNftInterest(address(next));
@@ -294,12 +294,12 @@ contract CoralNftInterestTest is CoralIdoBase {
     function _tiers(
         uint256 minNfts,
         uint256 weeklyBps
-    ) internal pure returns (CoralNftInterest.Tier[] memory tiers) {
-        tiers = new CoralNftInterest.Tier[](4);
-        tiers[0] = CoralNftInterest.Tier({minNfts: minNfts, weeklyBps: weeklyBps});
-        tiers[1] = CoralNftInterest.Tier({minNfts: 10, weeklyBps: 200});
-        tiers[2] = CoralNftInterest.Tier({minNfts: 20, weeklyBps: 250});
-        tiers[3] = CoralNftInterest.Tier({minNfts: 60, weeklyBps: 300});
+    ) internal pure returns (FreeDaoNFTInterest.Tier[] memory tiers) {
+        tiers = new FreeDaoNFTInterest.Tier[](4);
+        tiers[0] = FreeDaoNFTInterest.Tier({minNfts: minNfts, weeklyBps: weeklyBps});
+        tiers[1] = FreeDaoNFTInterest.Tier({minNfts: 10, weeklyBps: 200});
+        tiers[2] = FreeDaoNFTInterest.Tier({minNfts: 20, weeklyBps: 250});
+        tiers[3] = FreeDaoNFTInterest.Tier({minNfts: 60, weeklyBps: 300});
     }
 
     function _one(
@@ -324,14 +324,14 @@ contract CoralNftInterestTest is CoralIdoBase {
     }
 }
 
-contract CoralNftInterestCalendarTest is Test {
+contract FreeDaoNFTInterestCalendarTest is Test {
     function test_beijingSundayStepsAtMidnight() public {
         vm.chainId(56);
         CoralToken token = new CoralToken(address(this));
-        CoralNFT nft = new CoralNFT(address(this), "FreeDaoRWA", "FREEDAONFT");
+        FreeDaoNFT nft = new FreeDaoNFT(address(this), "FreeDaoRWA", "FREEDAONFT");
         CoralNetworks.Params memory params = CoralNetworks.bscMainnet();
         CoralIdo ido = new CoralIdo(params.usdt, address(token), address(nft), address(this), params);
-        CoralNftInterest interest = new CoralNftInterest(address(ido), address(this));
+        FreeDaoNFTInterest interest = new FreeDaoNFTInterest(address(ido), address(this));
         assertTrue(interest.calendarWeeks());
 
         uint256 boundary = interest.weekBoundary(100);

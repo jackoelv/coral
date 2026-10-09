@@ -4,7 +4,7 @@
 
 源：nemoido localdev de0edf9；原目录不修改。目标：现有 coral main，保留 jackoelv/coral 的 origin 和初始提交历史；源仓库历史完整保存在忽略目录 legacy-nemo-local/source-history.bundle。旧 .env、主网记录、历史导入与账本在 legacy-nemo-local/，不用于新部署、不纳入 Git。原目标 README/LICENSE/.gitignore 已在本次工作目录备份。
 
-用户确认：项目 Coral / 珊瑚；凭证 ERC20 name=Ckey、symbol=CKEY；NFT name=FreeDaoRWA、symbol=FREEDAONFT。源码类型为 CoralToken、CoralNFT、CoralIdo、CoralRewards、CoralNftInterest。CORAL 是项目/未来生态代币称呼，本次部署的 ERC20 是 CKEY，不额外部署一个 CORAL 币。
+用户确认：项目 Coral / 珊瑚；凭证 ERC20 name=Ckey、symbol=CKEY；NFT name=FreeDaoRWA、symbol=FREEDAONFT。源码类型为 CoralToken、FreeDaoNFT、CoralIdo、CoralRewards、FreeDaoNFTInterest。CORAL 是项目/未来生态代币称呼，本次部署的 ERC20 是 CKEY，不额外部署一个 CORAL 币。
 
 一期资产：帕劳雷迪森酒店两栋独栋别墅、十间海景客房的十年经营权，不涉及房地产所有权。现有四级身份、门槛、份额、33 席、奖励和发行机制保持各分支原样。33 席与一期客房分配关系须在后续交付安排中明确，未擅自改经济规则。英文未猜测酒店的官方英文名，暂保留用户提供的中文专名。旧建筑图换成现有生活方式图，旧 Nemo 吉祥物换成 FREEDAO 标识；正式新酒店照片待提供。
 

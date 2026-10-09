@@ -8,14 +8,14 @@ import {ReentrancyGuard} from "../lib/openzeppelin-contracts/contracts/utils/Ree
 import {CoralIdo} from "./CoralIdo.sol";
 import {CoralToken} from "./CoralToken.sol";
 
-/// @title CoralNftInterest
+/// @title FreeDaoNFTInterest
 /// @notice Weekly ckey interest for NFT holders during the IDO.
 ///         Tiers are versioned by week so a parameter change does not rewrite
 ///         weeks that have already ended. Users pull the accrued amount themselves.
 ///         Mainnet weeks end at Sunday 00:00:00 Asia/Shanghai. The unique block N
 ///         is the last block still timestamped 23:59; block N+1 is the first at 00:00.
 ///         Local and BSC testnet follow the vault's short week clock.
-contract CoralNftInterest is Ownable2Step, ReentrancyGuard {
+contract FreeDaoNFTInterest is Ownable2Step, ReentrancyGuard {
     uint256 public constant BPS_DENOMINATOR = 10_000;
     uint256 public constant MAX_WEEKLY_BPS = 1000;
     uint256 public constant MAX_TIERS = 16;
