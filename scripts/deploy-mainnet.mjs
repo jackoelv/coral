@@ -7,8 +7,11 @@
  *
  * The deployer stays Owner of all five contracts until handover:mainnet.
  *
+ * The deployer must have nonce 0. --allow-nonce <n> accepts a reused deployer only when its nonce is exactly n.
+ *
  *   npm run deploy:mainnet
  *   npm run deploy:mainnet -- --apply
+ *   npm run deploy:mainnet -- --apply --allow-nonce 44
  *   npm run deploy:mainnet -- --sync
  */
 import { spawnSync } from "node:child_process";
@@ -37,6 +40,9 @@ import {
 const apply = process.argv.includes("--apply");
 const syncOnly = process.argv.includes("--sync");
 if (apply && syncOnly) throw new Error("--apply 和 --sync 不能同时用");
+const allowAt = process.argv.indexOf("--allow-nonce");
+const allowedNonce = allowAt === -1 ? 0 : Number(process.argv[allowAt + 1]);
+if (!Number.isInteger(allowedNonce) || allowedNonce < 0) throw new Error("--allow-nonce 后面要跟部署账户当前的 nonce（整数）");
 const ARTIFACT = resolve(ROOT, "broadcast/Deploy.s.sol/56/run-latest.json");
 const forge = `${homedir()}/.foundry/bin/forge`;
 
@@ -103,7 +109,11 @@ async function preview() {
     nftImage: { uri: imageUri, ...image },
   };
   console.log(JSON.stringify(checks, null, 2));
-  if (nonce !== 0) throw new Error(`部署账户 nonce 是 ${nonce}，不是全新地址。查清楚是否已经部署过`);
+  if (nonce !== allowedNonce) {
+    if (allowedNonce === 0) throw new Error(`部署账户 nonce 是 ${nonce}，不是全新地址。查清楚是否已经部署过；确认要复用这个账户时加 --allow-nonce ${nonce}`);
+    throw new Error(`部署账户 nonce 是 ${nonce}，不是 --allow-nonce 给的 ${allowedNonce}。可能已经发过交易或部署过，停止`);
+  }
+  if (allowedNonce !== 0) console.warn(`复用部署账户 ${deployer}，nonce ${nonce}。移交后照常 --retire-deployer 清空私钥。`);
   if (!checks.usdtHasCode || decimals !== 18) throw new Error("官方 USDT 地址没有字节码或不是 18 位");
   if (image.status !== 200) console.warn(`警告：NFT 图片 HTTP ${image.status}。可以先部署，但第 12 节移交前必须让它返回 200。`);
   if (new URL(imageUri).host === "test.freedao.life") console.warn("NFT 图片暂时用 test.freedao.life。正式站上线后改成 www.freedao.life 的地址，再跑 nft-image:mainnet。");
