@@ -31,8 +31,8 @@ await pgClient.connect();
 let active;
 let proofCount;
 try {
-  active = (await pgClient.query(`SELECT root, content_hash, cumulative_wei, tx_hash FROM nemo_team_root WHERE chain_id = 56 AND ido_address = $1 AND active`, [a.IDO])).rows;
-  proofCount = Number((await pgClient.query(`SELECT count(*) AS n FROM nemo_team_proof WHERE chain_id = 56 AND ido_address = $1 AND root = $2`, [a.IDO, doc.root])).rows[0].n);
+  active = (await pgClient.query(`SELECT root, content_hash, cumulative_wei, tx_hash FROM coral_team_root WHERE chain_id = 56 AND ido_address = $1 AND active`, [a.IDO])).rows;
+  proofCount = Number((await pgClient.query(`SELECT count(*) AS n FROM coral_team_proof WHERE chain_id = 56 AND ido_address = $1 AND root = $2`, [a.IDO, doc.root])).rows[0].n);
 } finally {
   await pgClient.end();
 }

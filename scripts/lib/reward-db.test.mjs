@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { SCHEMA_SQL, advisoryKey, lockName } from "./reward-db.mjs";
 
 test("account, root and proof tables are keyed by vault address", () => {
-  assert.match(SCHEMA_SQL, /nemo_team_account[\s\S]*?PRIMARY KEY \(chain_id, ido_address, wallet\)/);
-  assert.match(SCHEMA_SQL, /nemo_team_root[\s\S]*?PRIMARY KEY \(chain_id, ido_address, root\)/);
-  assert.match(SCHEMA_SQL, /nemo_team_proof[\s\S]*?PRIMARY KEY \(chain_id, ido_address, root, wallet\)/);
+  assert.match(SCHEMA_SQL, /coral_team_account[\s\S]*?PRIMARY KEY \(chain_id, ido_address, wallet\)/);
+  assert.match(SCHEMA_SQL, /coral_team_root[\s\S]*?PRIMARY KEY \(chain_id, ido_address, root\)/);
+  assert.match(SCHEMA_SQL, /coral_team_proof[\s\S]*?PRIMARY KEY \(chain_id, ido_address, root, wallet\)/);
 });
 
 test("advisory lock key is stable and fits two int32 values", () => {

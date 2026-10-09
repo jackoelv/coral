@@ -38,11 +38,11 @@ export const SITE_RESET_TABLES = [
 
 /** Chain-97 index rows for every vault. Week boundaries stay. */
 export const CHAIN_INDEX_TABLES = [
-  { name: "nemo_team_proof", chainColumn: "chain_id" },
-  { name: "nemo_team_root", chainColumn: "chain_id" },
-  { name: "nemo_team_account", chainColumn: "chain_id" },
-  { name: "nemo_indexer_state", chainColumn: "chain_id" },
-  { name: "nemo_invite_cache", chainColumn: '"chainId"' },
+  { name: "coral_team_proof", chainColumn: "chain_id" },
+  { name: "coral_team_root", chainColumn: "chain_id" },
+  { name: "coral_team_account", chainColumn: "chain_id" },
+  { name: "coral_indexer_state", chainColumn: "chain_id" },
+  { name: "coral_invite_cache", chainColumn: '"chainId"' },
 ];
 
 const PREVIEW_SOURCES = [

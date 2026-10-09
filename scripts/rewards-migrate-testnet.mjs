@@ -58,7 +58,7 @@ async function claimedRows(env, ido) {
   await client.connect();
   try {
     const { rows } = await client.query(
-      `SELECT wallet, claimed_wei FROM nemo_team_account
+      `SELECT wallet, claimed_wei FROM coral_team_account
        WHERE chain_id = 97 AND lower(ido_address) = lower($1) AND claimed_wei <> '0'`,
       [ido],
     );

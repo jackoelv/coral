@@ -20,8 +20,10 @@ if (REHEARSAL) console.warn(`[演练] 读 ${MAINNET_ENV}，RPC 必须是 127.0.0
 export const CHAIN_ID = 56;
 export const USDT = "0x55d398326f99059fF775485246999027B3197955";
 export const PRODUCTION_DB_HOST = "ep-autumn-cake";
-export const PRODUCTION_DB_NAME = "neondb";
+export const PRODUCTION_DB_NAME = "production";
 export const PREVIEW_DB_NAME = "preview";
+/** The old production database. Retired on 2026-10-10; scripts refuse it. */
+export const RETIRED_DB_NAME = "neondb";
 export const TEST_DB_HOST = "ep-empty-king";
 export const FIXED_ENV = { NETWORK: "bscMainnet", CHAIN_ID: "56", BSC_MAINNET_USDT: USDT, CONFIRMATIONS: "15" };
 export const CONTRACT_KEYS = ["CKEY", "NFT", "IDO", "REWARDS", "INTEREST"];
@@ -202,21 +204,23 @@ export function read(client, address, abi, functionName, args = []) {
   return client.readContract({ address, abi, functionName, args });
 }
 
-/** Production database only: the old neondb on the formal Neon host, never the test database or the preview database. */
+/** Production database only: database `production` on the formal Neon host. Never neondb, the test database or preview. */
 export function productionDatabase(url) {
   const target = databaseTarget(url);
   if (target.host.includes(TEST_DB_HOST)) throw new Error(`${target.host} 是测试库，主网脚本拒绝连接`);
+  if (target.database === RETIRED_DB_NAME) throw new Error(`${target.host}/${RETIRED_DB_NAME} 是已停用的旧正式库，拒绝连接`);
   if (!target.host.includes(PRODUCTION_DB_HOST) || target.database !== PRODUCTION_DB_NAME) {
     throw new Error(`${target.host}/${target.database} 不是正式库 ${PRODUCTION_DB_HOST}/${PRODUCTION_DB_NAME}，拒绝连接`);
   }
   return target;
 }
 
-/** preview.freedao.life uses the preview database on the same Neon host. neondb stays the old production database. */
+/** preview.freedao.life uses the preview database on the same Neon host. */
 export function previewDatabase(url) {
   const target = databaseTarget(url);
   if (target.host.includes(TEST_DB_HOST)) throw new Error("PREVIEW_DATABASE_URL 指向了测试网的库，拒绝");
-  if (target.database === PRODUCTION_DB_NAME) throw new Error("PREVIEW_DATABASE_URL 指向了正式库 neondb，拒绝");
+  if (target.database === RETIRED_DB_NAME) throw new Error("PREVIEW_DATABASE_URL 指向了已停用的 neondb，拒绝");
+  if (target.database === PRODUCTION_DB_NAME) throw new Error("PREVIEW_DATABASE_URL 指向了正式库 production，拒绝");
   if (target.host.includes(PRODUCTION_DB_HOST) && target.database !== PREVIEW_DB_NAME) {
     throw new Error("PREVIEW_DATABASE_URL 指向了正式库，拒绝");
   }

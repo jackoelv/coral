@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Adds the nemo_* tables to the production database. Additive only: stops if any Nemo table exists.
+ * Adds the coral_* tables to the production database. Additive only: stops if any Coral table exists.
  * Requires a backup that passed `db-backup:mainnet -- --restore-check`.
  *
  *   npm run db-migrate:mainnet -- --backup <dump>
@@ -12,7 +12,7 @@ import pg from "pg";
 import { confirmTyped, need, productionDatabase, readMainnetEnv, sha256File, writeEvidence } from "./lib/mainnet.mjs";
 
 const DEFAULT_SQL = new URL("../mainnet/001-additive-schema.sql", import.meta.url).pathname;
-const NEMO_TABLES = ["nemo_invite_cache", "nemo_indexer_state", "nemo_team_account", "nemo_team_root", "nemo_team_proof", "nemo_interest_boundary"];
+const NEMO_TABLES = ["coral_invite_cache", "coral_indexer_state", "coral_team_account", "coral_team_root", "coral_team_proof", "coral_interest_boundary"];
 const args = process.argv.slice(2);
 const value = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : null);
 const apply = args.includes("--apply");

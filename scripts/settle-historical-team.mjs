@@ -96,7 +96,7 @@ async function writeIndex(env, rows) {
     for (const row of rows) {
       if (row.teamRewardWei === 0n && !row.offsetWei) continue;
       await client.query(
-        `INSERT INTO nemo_team_account
+        `INSERT INTO coral_team_account
            (chain_id, ido_address, wallet, referrer, self_wei, team_wei, team_reward_wei, historical_team_reward_wei, direct_wei, claimed_wei)
          VALUES ($1, $2, $3, NULL, $4, $5, '0', $6, '0', '0')
          ON CONFLICT (chain_id, ido_address, wallet)

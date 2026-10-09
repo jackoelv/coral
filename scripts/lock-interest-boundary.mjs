@@ -2,7 +2,7 @@
 /**
  * 找出 BSC 主网上，某个北京时间周日 00:00 对应的唯一高度。
  * 高度 N 的区块时间仍是 23:59:xx，N+1 已是 00:00:xx。
- * 没有 RPC_URL 时只说明，不假装已经查到区块。有 DATABASE_URL 时写入 nemo_interest_boundary。
+ * 没有 RPC_URL 时只说明，不假装已经查到区块。有 DATABASE_URL 时写入 coral_interest_boundary。
  *
  *   RPC_URL=... node scripts/lock-interest-boundary.mjs
  *   RPC_URL=... DATABASE_URL=... node scripts/lock-interest-boundary.mjs --week 2960
@@ -93,7 +93,7 @@ try {
     blockN1: row.blockN1,
     blockN1Time: row.blockN1Time,
   });
-  console.log(`已写入 nemo_interest_boundary 周 ${row.week} 高度 N ${row.blockN}`);
+  console.log(`已写入 coral_interest_boundary 周 ${row.week} 高度 N ${row.blockN}`);
 } finally {
   await db.end();
 }

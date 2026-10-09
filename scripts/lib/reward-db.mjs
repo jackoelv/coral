@@ -3,7 +3,7 @@ import { emptyIndexState } from "./reward-index.mjs";
 import { bind } from "./team-reward.mjs";
 
 export const SCHEMA_SQL = `
-CREATE TABLE IF NOT EXISTS nemo_indexer_state (
+CREATE TABLE IF NOT EXISTS coral_indexer_state (
   chain_id bigint NOT NULL,
   ido_address text NOT NULL,
   rewards_address text,
@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS nemo_indexer_state (
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (chain_id, ido_address)
 );
-CREATE TABLE IF NOT EXISTS nemo_team_account (
+CREATE TABLE IF NOT EXISTS coral_team_account (
   chain_id bigint NOT NULL,
   ido_address text NOT NULL,
   wallet text NOT NULL,
@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS nemo_team_account (
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (chain_id, ido_address, wallet)
 );
-CREATE TABLE IF NOT EXISTS nemo_team_root (
+CREATE TABLE IF NOT EXISTS coral_team_root (
   chain_id bigint NOT NULL,
   ido_address text NOT NULL,
   root text NOT NULL,
@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS nemo_team_root (
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (chain_id, ido_address, root)
 );
-CREATE TABLE IF NOT EXISTS nemo_interest_boundary (
+CREATE TABLE IF NOT EXISTS coral_interest_boundary (
   chain_id bigint NOT NULL,
   week bigint NOT NULL,
   boundary_unix bigint NOT NULL,
@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS nemo_interest_boundary (
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (chain_id, week)
 );
-CREATE TABLE IF NOT EXISTS nemo_team_proof (
+CREATE TABLE IF NOT EXISTS coral_team_proof (
   chain_id bigint NOT NULL,
   ido_address text NOT NULL,
   root text NOT NULL,
@@ -59,9 +59,9 @@ CREATE TABLE IF NOT EXISTS nemo_team_proof (
 `;
 
 const SCOPED_KEYS = {
-  nemo_team_account: ["chain_id", "ido_address", "wallet"],
-  nemo_team_root: ["chain_id", "ido_address", "root"],
-  nemo_team_proof: ["chain_id", "ido_address", "root", "wallet"],
+  coral_team_account: ["chain_id", "ido_address", "wallet"],
+  coral_team_root: ["chain_id", "ido_address", "root"],
+  coral_team_proof: ["chain_id", "ido_address", "root", "wallet"],
 };
 
 export function advisoryKey(name) {
@@ -76,7 +76,7 @@ export function advisoryKey(name) {
 }
 
 export function lockName(chainId, idoAddress) {
-  return `nemo:${chainId}:${idoAddress.toLowerCase()}`;
+  return `coral:${chainId}:${idoAddress.toLowerCase()}`;
 }
 
 export async function tryLock(client, name) {
@@ -94,9 +94,9 @@ export async function ensureSchema(client) {
   await client.query(SCHEMA_SQL);
   for (const [table, cols] of Object.entries(SCOPED_KEYS)) {
     await client.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ido_address text NOT NULL DEFAULT ''`);
-    if (table === "nemo_team_account") {
+    if (table === "coral_team_account") {
       await client.query(
-        `ALTER TABLE nemo_team_account ADD COLUMN IF NOT EXISTS historical_team_reward_wei text NOT NULL DEFAULT '0'`,
+        `ALTER TABLE coral_team_account ADD COLUMN IF NOT EXISTS historical_team_reward_wei text NOT NULL DEFAULT '0'`,
       );
     }
     const { rows } = await client.query(
@@ -115,7 +115,7 @@ export async function ensureSchema(client) {
 
 export async function loadCheckpoint(client, chainId, idoAddress) {
   const { rows } = await client.query(
-    `SELECT last_block, rewards_address FROM nemo_indexer_state WHERE chain_id = $1 AND ido_address = $2`,
+    `SELECT last_block, rewards_address FROM coral_indexer_state WHERE chain_id = $1 AND ido_address = $2`,
     [chainId, idoAddress],
   );
   return rows[0] || null;
@@ -143,7 +143,7 @@ export function stateFromRows(rows) {
 export async function loadAccounts(client, chainId, idoAddress) {
   const { rows } = await client.query(
     `SELECT wallet, referrer, self_wei, team_wei, team_reward_wei, historical_team_reward_wei, direct_wei, claimed_wei
-     FROM nemo_team_account WHERE chain_id = $1 AND ido_address = $2`,
+     FROM coral_team_account WHERE chain_id = $1 AND ido_address = $2`,
     [chainId, idoAddress],
   );
   return rows;
@@ -153,13 +153,13 @@ export async function saveIndex(client, { chainId, idoAddress, rewardsAddress, l
   await client.query("BEGIN");
   try {
     const advanced = await client.query(
-      `INSERT INTO nemo_indexer_state (chain_id, ido_address, rewards_address, last_block)
+      `INSERT INTO coral_indexer_state (chain_id, ido_address, rewards_address, last_block)
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (chain_id, ido_address)
        DO UPDATE SET rewards_address = EXCLUDED.rewards_address,
                      last_block = EXCLUDED.last_block,
                      updated_at = now()
-       WHERE nemo_indexer_state.last_block < EXCLUDED.last_block
+       WHERE coral_indexer_state.last_block < EXCLUDED.last_block
        RETURNING last_block`,
       [chainId, idoAddress, rewardsAddress, lastBlock],
     );
@@ -169,7 +169,7 @@ export async function saveIndex(client, { chainId, idoAddress, rewardsAddress, l
     }
     for (const row of rows) {
       await client.query(
-        `INSERT INTO nemo_team_account
+        `INSERT INTO coral_team_account
            (chain_id, ido_address, wallet, referrer, self_wei, team_wei, team_reward_wei, direct_wei, claimed_wei)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          ON CONFLICT (chain_id, ido_address, wallet)
@@ -206,23 +206,23 @@ export async function saveRoot(client, { chainId, idoAddress, root, contentHash,
   try {
     if (active) {
       await client.query(
-        `UPDATE nemo_team_root SET active = false WHERE chain_id = $1 AND ido_address = $2 AND root <> $3`,
+        `UPDATE coral_team_root SET active = false WHERE chain_id = $1 AND ido_address = $2 AND root <> $3`,
         [chainId, idoAddress, root],
       );
     }
     await client.query(
-      `INSERT INTO nemo_team_root (chain_id, ido_address, root, content_hash, cumulative_wei, tx_hash, active)
+      `INSERT INTO coral_team_root (chain_id, ido_address, root, content_hash, cumulative_wei, tx_hash, active)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        ON CONFLICT (chain_id, ido_address, root)
        DO UPDATE SET content_hash = EXCLUDED.content_hash,
                      cumulative_wei = EXCLUDED.cumulative_wei,
-                     tx_hash = COALESCE(EXCLUDED.tx_hash, nemo_team_root.tx_hash),
-                     active = EXCLUDED.active OR nemo_team_root.active`,
+                     tx_hash = COALESCE(EXCLUDED.tx_hash, coral_team_root.tx_hash),
+                     active = EXCLUDED.active OR coral_team_root.active`,
       [chainId, idoAddress, root, contentHash, cumulativeWei.toString(), txHash, active],
     );
     for (const proof of proofs) {
       await client.query(
-        `INSERT INTO nemo_team_proof (chain_id, ido_address, root, wallet, cumulative_wei, proof)
+        `INSERT INTO coral_team_proof (chain_id, ido_address, root, wallet, cumulative_wei, proof)
          VALUES ($1, $2, $3, $4, $5, $6::jsonb)
          ON CONFLICT (chain_id, ido_address, root, wallet)
          DO UPDATE SET cumulative_wei = EXCLUDED.cumulative_wei, proof = EXCLUDED.proof`,
@@ -238,7 +238,7 @@ export async function saveRoot(client, { chainId, idoAddress, root, contentHash,
 
 export async function saveInterestBoundary(client, row) {
   await client.query(
-    `INSERT INTO nemo_interest_boundary
+    `INSERT INTO coral_interest_boundary
        (chain_id, week, boundary_unix, block_n, block_n_time, block_n1, block_n1_time)
      VALUES ($1, $2, $3, $4, $5, $6, $7)
      ON CONFLICT (chain_id, week)
