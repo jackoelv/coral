@@ -107,6 +107,10 @@ async function verifyAll(records, analysis) {
 }
 
 if (refresh && existsSync(LOCK)) throw new Error("已经开始写链，不能重新导出。输入文件要和第一次 --apply 时一致");
+if (existsSync(runPath("old-cutoff.json"))) {
+  if (!existsSync(runPath("migration-snapshot.json"))) throw new Error("旧合约已关闭，处于迁移中。先跑 npm run snapshot:mainnet，它会把旧金库上的入金并进导入文件");
+  if (refresh || !existsSync(FILE)) throw new Error("迁移中不能从正式库重新导出，会漏掉旧金库上的入金。重跑 npm run snapshot:mainnet 生成导入文件");
+}
 if (!existsSync(FILE) || (refresh && !apply && !open)) exportFresh();
 const records = load();
 const analysis = analyzeImport(records);

@@ -76,6 +76,18 @@ export function contracts(env) {
   return Object.fromEntries(CONTRACT_KEYS.map((key) => [key, addressOf(env, `BSC_MAINNET_${key}`)]));
 }
 
+/** The vault being replaced. Only retire-old:mainnet, snapshot:mainnet and sign:mainnet read these. */
+export function oldContracts(env) {
+  const startBlock = need(env, "OLD_MAINNET_START_BLOCK");
+  if (!/^\d+$/.test(startBlock)) throw new Error("OLD_MAINNET_START_BLOCK 必须是区块号");
+  return {
+    IDO: addressOf(env, "OLD_MAINNET_IDO"),
+    REWARDS: addressOf(env, "OLD_MAINNET_REWARDS"),
+    CKEY: addressOf(env, "OLD_MAINNET_CKEY"),
+    startBlock: BigInt(startBlock),
+  };
+}
+
 export function positiveWei(env, key, { allowZero = false } = {}) {
   const raw = need(env, key);
   if (!/^\d+$/.test(raw)) throw new Error(`${key} 必须是整数 wei`);

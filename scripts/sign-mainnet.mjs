@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseEnv } from "node:util";
 import { getAddress } from "viem";
-import { ROOT, contracts, need, readMainnetEnv } from "./lib/mainnet.mjs";
+import { ROOT, contracts, need, oldContracts, readMainnetEnv } from "./lib/mainnet.mjs";
 import { readPlan } from "./lib/sign-plan.mjs";
 import { servePlan } from "./lib/sign-server.mjs";
 
@@ -28,7 +28,12 @@ let walletConnectProjectId = "";
 if (plan.chainId === 56) {
   const env = readMainnetEnv();
   rpc = need(env, "BSC_MAINNET_RPC");
-  allowed = Object.values(contracts(env));
+  if (plan.meta?.kind === "retireOld") {
+    const old = oldContracts(env);
+    allowed = [old.IDO, old.CKEY];
+  } else {
+    allowed = Object.values(contracts(env));
+  }
   walletConnectProjectId = env.WALLETCONNECT_PROJECT_ID || "";
 } else if (plan.chainId === 97) {
   const env = parseEnv(readFileSync(resolve(ROOT, ".env"), "utf8"));

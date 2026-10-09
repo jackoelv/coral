@@ -2,6 +2,7 @@
 /**
  * Runs scripts/settle-historical-team.mjs on mainnet-run/import-data.json.
  * Output goes to mainnet-run/historical-team-rewards.json. --apply writes the database only, no transactions.
+ * Requires mainnet-run/old-paid.json from snapshot:mainnet; amounts already claimed on the old rewards contract are subtracted.
  *
  *   npm run settle-team:mainnet
  *   npm run settle-team:mainnet -- --apply
@@ -15,6 +16,8 @@ import { RUN_DIR, ROOT, cleanEnv, contracts, readMainnetEnv, runPath, selectedDa
 const env = readMainnetEnv();
 const a = contracts(env);
 if (!existsSync(runPath("import-data.json"))) throw new Error("没有 mainnet-run/import-data.json，先跑 import:mainnet");
+if (!existsSync(runPath("old-paid.json"))) throw new Error("没有 mainnet-run/old-paid.json，先跑 snapshot:mainnet。不扣旧合约已领的网体奖会重复支付");
+if (process.argv.includes("--paid-offset")) throw new Error("--paid-offset 由本脚本固定为 mainnet-run/old-paid.json，不要手动传");
 const db = selectedDatabase(env);
 const prod = selectedDatabase(env, []);
 console.log(`历史网体奖 -> ${db.name} 库 ${db.target.host}/${db.target.database}，金库 ${a.IDO}`);
@@ -26,7 +29,7 @@ const prodFile = runPath(`.settle-team-prod-${process.pid}.env`);
 writeFileSync(prodFile, `DATABASE_URL=${JSON.stringify(prod.url)}\n`, { mode: 0o600 });
 try {
   const passthrough = process.argv.slice(2).filter((arg, i, all) => arg !== "--db" && all[i - 1] !== "--db");
-  const result = spawnSync(process.execPath, [resolve(ROOT, "scripts/settle-historical-team.mjs"), ...passthrough], {
+  const result = spawnSync(process.execPath, [resolve(ROOT, "scripts/settle-historical-team.mjs"), "--paid-offset", "old-paid.json", ...passthrough], {
     cwd: RUN_DIR,
     env: cleanEnv({ NEMO_ENV_FILE: scoped, PROD_ENV_FILE: prodFile }),
     stdio: "inherit",

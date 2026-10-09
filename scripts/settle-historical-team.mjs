@@ -9,14 +9,18 @@
  * 当前已部署的测试网奖励合约还没有 historicalTeamBudget。
  * 主网用新合约时，先把额度设成打印出的合计，并把等额 USDT 打进金库，再发布 root。
  *
+ * 换合约迁移时加 --paid-offset <文件>：每个地址扣掉旧奖励合约上已经领过的网体奖，只把差额写进索引库。
+ *
  *   npm run settle:historical-team
  *   npm run settle:historical-team -- --apply
+ *   npm run settle:historical-team -- --paid-offset old-paid.json
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseEnv } from "node:util";
 import { formatUnits, getAddress } from "viem";
 import { settleHistoricalTeam } from "./lib/historical-team.mjs";
+import { applyPaidOffset, readPaidOffset } from "./lib/migration.mjs";
 import { ensureSchema } from "./lib/reward-db.mjs";
 
 const OUT = "historical-team-rewards.json";
@@ -90,7 +94,7 @@ async function writeIndex(env, rows) {
     const chainId = Number(env.CHAIN_ID);
     const ido = getAddress(env.IDO_ADDRESS);
     for (const row of rows) {
-      if (row.teamRewardWei === 0n) continue;
+      if (row.teamRewardWei === 0n && !row.offsetWei) continue;
       await client.query(
         `INSERT INTO nemo_team_account
            (chain_id, ido_address, wallet, referrer, self_wei, team_wei, team_reward_wei, historical_team_reward_wei, direct_wei, claimed_wei)
@@ -108,38 +112,53 @@ async function writeIndex(env, rows) {
 
 async function main() {
   const apply = process.argv.includes("--apply");
+  const offsetAt = process.argv.indexOf("--paid-offset");
+  const offsetFile = offsetAt === -1 ? null : process.argv[offsetAt + 1];
+  if (offsetAt !== -1 && (!offsetFile || offsetFile.startsWith("--"))) throw new Error("--paid-offset 后面要跟文件路径");
   const records = loadRecords();
   await fillOrders(records);
   const settled = settleHistoricalTeam(records);
+  const rows = offsetFile ? applyPaidOffset(settled.rows, readPaidOffset(resolve(offsetFile))) : settled.rows;
+  const grossWei = settled.teamRewardWei;
+  const offsetWei = rows.reduce((sum, row) => sum + (row.offsetWei || 0n), 0n);
+  const netWei = rows.reduce((sum, row) => sum + row.teamRewardWei, 0n);
   const payload = {
     generatedAt: new Date().toISOString(),
-    teamRewardWei: settled.teamRewardWei.toString(),
+    paidOffset: offsetFile ? resolve(offsetFile) : null,
+    grossTeamRewardWei: grossWei.toString(),
+    offsetWei: offsetWei.toString(),
+    teamRewardWei: netWei.toString(),
     directExcludedWei: settled.directExcluded.toString(),
-    rows: settled.rows.map((row) => ({
+    rows: rows.map((row) => ({
       wallet: row.wallet,
       selfWei: row.selfWei.toString(),
       teamWei: row.teamWei.toString(),
+      grossWei: (row.grossWei ?? row.teamRewardWei).toString(),
+      offsetWei: (row.offsetWei ?? 0n).toString(),
       teamRewardWei: row.teamRewardWei.toString(),
     })),
   };
   writeFileSync(resolve(OUT), `${JSON.stringify(payload, null, 2)}\n`);
   console.log(JSON.stringify({
-    accounts: settled.rows.length,
-    historicalTeamReward: formatUnits(settled.teamRewardWei, 18),
+    accounts: rows.length,
+    grossHistoricalTeamReward: formatUnits(grossWei, 18),
+    paidOnOldContract: formatUnits(offsetWei, 18),
+    historicalTeamReward: formatUnits(netWei, 18),
     directExcluded: formatUnits(settled.directExcluded, 18),
-    budget: settled.teamRewardWei.toString(),
+    budget: netWei.toString(),
     apply,
   }));
   console.log("直推不进这次清算。历史网体奖按下表。伞下已经包含导入业绩，开售后的新入金按这个规模定档。");
-  for (const row of settled.rows) {
-    if (row.selfWei === 0n && row.teamRewardWei === 0n) continue;
-    console.log(`${row.wallet} 本人=${formatUnits(row.selfWei, 18)} 伞下=${formatUnits(row.teamWei, 18)} 历史网体奖=${formatUnits(row.teamRewardWei, 18)}`);
+  for (const row of rows) {
+    if (row.selfWei === 0n && row.teamRewardWei === 0n && !row.offsetWei) continue;
+    const offset = offsetFile ? ` 总额=${formatUnits(row.grossWei, 18)} 旧合约已领=${formatUnits(row.offsetWei, 18)}` : "";
+    console.log(`${row.wallet} 本人=${formatUnits(row.selfWei, 18)} 伞下=${formatUnits(row.teamWei, 18)}${offset} 历史网体奖=${formatUnits(row.teamRewardWei, 18)}`);
   }
   if (!apply) {
-    console.log(`dry-run。明细在 ${OUT}。确认后加 --apply 写入索引库。发布 root 前，新奖励合约要把 historicalTeamBudget 设成 ${formatUnits(settled.teamRewardWei, 18)} USDT，并先把这笔 USDT 打进金库。`);
+    console.log(`dry-run。明细在 ${OUT}。确认后加 --apply 写入索引库。发布 root 前，新奖励合约要把 historicalTeamBudget 设成 ${formatUnits(netWei, 18)} USDT，并先把这笔 USDT 打进金库。`);
     return;
   }
-  await writeIndex(readRepoEnv(), settled.rows);
+  await writeIndex(readRepoEnv(), rows);
   console.log("历史网体奖已写入索引库。重新跑索引不会把它清掉。");
 }
 

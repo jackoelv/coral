@@ -46,7 +46,9 @@
     "vercel:mainnet-preview": "node scripts/vercel-mainnet.mjs --target mainnetpreview",
     "vercel:mainnet-production": "node scripts/vercel-mainnet.mjs --target production",
     "publish:mainnet": "node scripts/publish-mainnet.mjs",
-    "verify-root:mainnet": "node scripts/verify-root-mainnet.mjs"
+    "verify-root:mainnet": "node scripts/verify-root-mainnet.mjs",
+    "retire-old:mainnet": "node scripts/retire-old-mainnet.mjs",
+    "snapshot:mainnet": "node scripts/snapshot-mainnet.mjs"
   },
   "dependencies": {
     "@walletconnect/sign-client": "^2.25.0",
