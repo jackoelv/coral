@@ -8,7 +8,7 @@
 
 ## 1. 先看实测：深度到底花多少 gas
 
-在当前代码（挂 `NemoTeamReward`，默认五档）上构造纯线性邀请链，测叶子一笔 1000 USDT 入金的 gas：
+在当时的代码（挂载链上团队模块，默认五档）上构造纯线性邀请链，测叶子一笔 1000 USDT 入金的 gas：
 
 | 链深 | 首次入金（祖先 `teamVolume` 由 0 变非 0） | 同链第二笔（槽位已非 0） |
 |------|------------------------------------------|--------------------------|
@@ -69,7 +69,7 @@ B 与 C 在 gas 上几乎没差别——直推只有一跳，留在链上几乎�
 | 现有 | 改后 |
 |------|------|
 | `_bumpAncestorTeam`（金库唯一无界循环） | 删 |
-| `NemoTeamReward` + `INemoTeamHost` 回调 | 删，或只留作链下计算器的规格参考 |
+| 链上团队模块及其宿主回调 | 删，或只留作链下计算器的规格参考 |
 | `accrueTeam` / `addTeamVolume` / `_settling` / `_settleAmount` / `_settleDirectPaid` / `_settleTeamPaid` / `NotTeamModule` | 删 |
 | `maxReferralDepth` / `MAX_REFERRAL_DEPTH_CAP` / `DepthExceeded` / `Account.depth` | 不再需要 |
 | `teamTierVolume` / `teamTierBps` / `setTeamTiers` / `teamBpsForVolume` / `teamBpsOf` | 删 |
@@ -210,7 +210,7 @@ B 与 C 在 gas 上几乎没差别——直推只有一跳，留在链上几乎�
 
 落地顺序：
 
-1. 先把现有 `NemoTeamReward` 的逻辑 1:1 移植成链下计算器，用 `test/CoralIdo.team.t.sol` 里的 ABCD、6 万 overlay 数字做交叉验证（确保链下结果与链上现状完全一致）
+1. 先把当时链上团队模块的逻辑 1:1 移植成链下计算器，用 `test/CoralIdo.team.t.sol` 里的 ABCD、6 万 overlay 数字做交叉验证（确保链下结果与链上现状完全一致）
 2. 照 1inch / Morpho 写 `publishRoot(root, ipfsHash, total)` + `claim(cumulative, proof)`，加全局 25% 帽与 timelock
 3. 再加 EIP-712 垫付通道与额度闸
 4. 最后才删除模块回调与深度上限

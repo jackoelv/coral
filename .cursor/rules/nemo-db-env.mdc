@@ -3,7 +3,7 @@ description: 发 root、索引、结算前先确认 preview 还是正式库
 alwaysApply: true
 ---
 
-# Nemo 数据库环境（短期，2026-10-08）
+# Coral 数据库环境（短期，2026-10-08）
 
 原文在知识库 `source/notes/2026-10-08-nemo-preview-db-env.md`。环境切换后先改原文。
 

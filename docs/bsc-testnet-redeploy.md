@@ -170,7 +170,7 @@ npm run settle:imported -- --network mainnet --apply
 
 ## 10. 给测试钱包补铸现有 MockUSDT
 
-币仍是 `0x9E674AfE8C7c31DB30d4E2B93b524fe4302f0D57`。钱包里已经有的余额留在这份合约上。脚本读取 `/Users/jack/Documents/Sensitive/nemo-bsc-testnet-wallets.json` 里的地址，不使用里面的私钥。每个地址再铸 100,000 USDT。Gas 由 `.env` 的 `TEST_PRIVATE_KEY` 支付，收款地址自己不用出 gas。部署账户必须仍是这份 MockUSDT 的 owner。
+币仍是 `0x9E674AfE8C7c31DB30d4E2B93b524fe4302f0D57`。钱包里已经有的余额留在这份合约上。脚本读取本地测试钱包清单里的地址，不使用里面的私钥。清单不入库。每个地址再铸 100,000 USDT。Gas 由 `.env` 的 `TEST_PRIVATE_KEY` 支付，收款地址自己不用出 gas。部署账户必须仍是这份 MockUSDT 的 owner。
 
 先打印地址：
 
@@ -271,7 +271,7 @@ npm run vercel:testnet-preview
 npm run vercel:testnet-preview -- --apply
 ```
 
-随后重新部署 FreeDao 的 Vercel Preview，让公开配置进入新构建。部署目标域名及本地 FreeDao `.env.local` 是另一个项目的配置，不由本次 nemoido 部署脚本自动覆盖。完成测试入金后：
+随后重新部署 FreeDao 的 Vercel Preview，让公开配置进入新构建。部署目标域名及本地 FreeDao `.env.local` 是另一个项目的配置，不由本次 Coral 部署脚本自动覆盖。完成测试入金后：
 
 ```bash
 CHUNK_BLOCKS=50000 npm run index:rewards

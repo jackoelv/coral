@@ -5,6 +5,8 @@
 范围：`src/` 下全部合约、`script/Deploy.s.sol`、`scripts/` 下的链下计算、索引、发布、核对、导入和周界脚本  
 配套安全报告：[SECURITY-AUDIT-2026-09-24-R6.md](SECURITY-AUDIT-2026-09-24-R6.md)。R5、R4、R3、R2 和第一版保留为历史
 
+名称：项目与金库写 Coral，凭证写 CKEY，NFT 与周息写 FreeDaoNFT、FreeDaoNFTInterest。下文里仍出现的 `nemo()`、`NemoAllocated`、`nemo_*` 表、`NEMO_*` 变量和 `nemo-sim` 前缀，是链上选择器、已有表和导入算法的原名，没有改成另一套名字。
+
 ---
 
 ## 1. 系统总览
@@ -25,7 +27,7 @@ flowchart LR
   Interest -->|mint 周息| Token
   Vault -.事件.-> Indexer[index-rewards.mjs]
   Rewards -.TeamClaimed.-> Indexer
-  Indexer --> DB[(Postgres nemo_*)]
+  Indexer --> DB[(Postgres 奖励表)]
   DB --> Publisher[publish-root.mjs 本地电脑]
   Publisher -->|publishRoot 立即生效| Rewards[CoralRewards]
   Publisher -->|公开明细 JSON| Public[社区 verify-root.mjs]

@@ -107,7 +107,7 @@ struct Account {
 
 ## 5. 链下极差
 
-与已删除的 `NemoTeamReward` 同一套口径：
+与已删除的链上团队模块同一套口径：
 
 - 资格含本人。费率看本笔 bump 之前的资格。
 - `prevBps` 从 0 起，入金者自己的档位不压缩上级。
@@ -157,7 +157,7 @@ struct Account {
 | `scripts/scale-anvil.mjs` | 约 300 个地址的真实交易、gas 对比、root 和领取 |
 | `scripts/scale-network.sh` | local 会部署并跑；测试网缺密钥时只打印说明，不假装已经上链 |
 
-`test/NemoScale.t.sol` 覆盖无上级、只直推、跨档、小于 100U、深浅 gas。`test/CoralRewards.t.sol` 覆盖错误 proof、timelock、挑战撤销、重复领取。`test/SimMarket.t.sol` 仍跳过，它描述的是旧三档，不作为本结构的验收。
+`test/CoralScale.t.sol` 覆盖无上级、只直推、跨档、小于 100U、深浅 gas。`test/CoralRewards.t.sol` 覆盖错误 proof、timelock、挑战撤销、重复领取。`test/SimMarket.t.sol` 仍跳过，它描述的是旧三档，不作为本结构的验收。
 
 ---
 
