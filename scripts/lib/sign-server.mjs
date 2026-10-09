@@ -16,7 +16,7 @@ const EXPLORER = { 56: "https://bscscan.com", 97: "https://testnet.bscscan.com" 
  * times 1.5, and only a successful receipt counts.
  * Resolves once every tx in the plan has a successful receipt.
  */
-export async function servePlan(planPath, { rpc, allowed, port = 8756, onConfirmed, walletConnectProjectId: rawProjectId = "" } = {}) {
+export async function servePlan(planPath, { rpc, allowed, port = 8756, onConfirmed, walletConnectProjectId: rawProjectId = "", openSession = openImtokenSession, openBrowser = true } = {}) {
   let plan = readPlan(planPath);
   const client = createPublicClient({ transport: http(rpc, { retryCount: 2, timeout: 30_000 }) });
   if ((await client.getChainId()) !== plan.chainId) throw new Error(`RPC 不是计划要求的 chainId ${plan.chainId}`);
@@ -43,11 +43,45 @@ export async function servePlan(planPath, { rpc, allowed, port = 8756, onConfirm
     explorer: EXPLORER[plan.chainId],
     next: nextPending(plan),
     txs: checkPlan(plan, allowed).map((row, i) => ({ ...row, error: plan.txs[i].error || null })),
+    waiting: pending ? { index: pending.index, seconds: Math.round((Date.now() - pending.startedAt) / 1000) } : null,
   });
+
+  const pendingNonce = () => client.getTransactionCount({ address: signer, blockTag: "pending" });
+
+  function record(index, hash) {
+    const tx = plan.txs[index];
+    tx.status = "submitted";
+    tx.hash = hash;
+    tx.error = null;
+    save();
+    track(index, hash);
+  }
+
+  function abandon(reason) {
+    const entry = pending;
+    entry.abandoned = true;
+    abandoned = entry;
+    pending = null;
+    console.log(reason);
+    entry.cancel(new Error(reason));
+  }
+
+  function lateResult(entry, hash) {
+    const tx = plan.txs[entry.index];
+    if (tx.hash && tx.hash.toLowerCase() === hash.toLowerCase()) return;
+    if (tx.status === "submitted" || tx.status === "success") {
+      console.error(`已放弃的那次请求后来也返回了哈希 ${hash}，而这笔已经用 ${tx.hash} 提交。去浏览器核对签名账户是否发出了两笔。`);
+      return;
+    }
+    console.log(`已放弃的那次请求后来返回了哈希 ${hash}，按这笔交易继续跟踪。`);
+    record(entry.index, hash);
+  }
 
   let imtoken = null;
   let closed = false;
-  let signing = false;
+  // A phone that lost its network never answers; the operator must be able to give up and resend.
+  let pending = null;
+  let abandoned = null;
   const wcFallback = {
     enabled: Boolean(projectId) && !projectError,
     status: projectError ? "error" : projectId ? "starting" : "off",
@@ -60,7 +94,7 @@ export async function servePlan(planPath, { rpc, allowed, port = 8756, onConfirm
   const wcView = () => (imtoken ? imtoken.snapshot() : wcFallback);
 
   if (projectId) {
-    openImtokenSession({ projectId, chainId: plan.chainId, signer }).then((session) => {
+    openSession({ projectId, chainId: plan.chainId, signer }).then((session) => {
       if (closed) {
         session.close().catch(() => {});
         return;
@@ -82,6 +116,7 @@ export async function servePlan(planPath, { rpc, allowed, port = 8756, onConfirm
 
   async function track(index, hash) {
     const tx = plan.txs[index];
+    let receipt;
     try {
       let live = null;
       for (let i = 0; i < 120 && !live; i++) {
@@ -93,20 +128,27 @@ export async function servePlan(planPath, { rpc, allowed, port = 8756, onConfirm
       if (!live.to || getAddress(live.to) !== getAddress(tx.to) || live.input.toLowerCase() !== tx.data.toLowerCase()) {
         throw new Error("链上交易的目标或 calldata 和计划不一致");
       }
-      const receipt = await client.waitForTransactionReceipt({ hash, confirmations: 3, timeout: 600_000 });
+      receipt = await client.waitForTransactionReceipt({ hash, confirmations: 3, timeout: 600_000 });
       tx.status = receipt.status === "success" ? "success" : "reverted";
       tx.blockNumber = receipt.blockNumber.toString();
       tx.error = tx.status === "reverted" ? `交易回滚：${hash}` : null;
       save();
       console.log(`${tx.label} ${tx.status} ${hash}`);
-      if (tx.status === "success" && onConfirmed) await onConfirmed({ plan, index, tx, receipt });
-      if (nextPending(plan) === -1) setTimeout(() => finish(plan), 1500);
     } catch (error) {
       tx.status = "failed";
       tx.error = error.message || String(error);
       save();
       console.error(`${tx.label} ${tx.error}`);
+      return;
     }
+    if (tx.status === "success" && onConfirmed) {
+      try {
+        await onConfirmed({ plan, index, tx, receipt });
+      } catch (error) {
+        console.error(`${tx.label} 链上已成功（${hash}），但后续登记失败：${error.message || error}。用原来的 --resume 打开同一份计划补登记，不要重新签。`);
+      }
+    }
+    if (nextPending(plan) === -1) setTimeout(() => finish(plan), 1500);
   }
 
   for (const [index, tx] of plan.txs.entries()) if (tx.status === "submitted" && tx.hash) track(index, tx.hash);
@@ -126,8 +168,14 @@ export async function servePlan(planPath, { rpc, allowed, port = 8756, onConfirm
       let body = "";
       for await (const chunk of req) body += chunk;
       const input = JSON.parse(body || "{}");
+      if (req.url === "/wc/abandon") {
+        if (!pending) return send(409, { error: "现在没有在等手机的请求" });
+        abandon("已放弃这次请求。手机上如果还弹出这笔，请点拒绝。");
+        return send(200, { ok: true });
+      }
       if (req.url === "/wc/reconnect") {
         if (!imtoken) return send(409, { error: wcView().message || "imToken 还没准备好" });
+        if (pending) abandon("已重新连接，原来那次请求作废。手机上如果还弹出那笔，请点拒绝。");
         await imtoken.reconnect();
         return send(200, imtoken.snapshot());
       }
@@ -140,30 +188,40 @@ export async function servePlan(planPath, { rpc, allowed, port = 8756, onConfirm
       }
       if (req.url === "/wc/sign") {
         if (!imtoken) return send(409, { error: wcView().message || "imToken 还没连上" });
-        if (signing) return send(409, { error: "上一笔还在等手机确认" });
+        if (pending) {
+          const seconds = Math.round((Date.now() - pending.startedAt) / 1000);
+          return send(409, { error: `上一笔已等手机 ${seconds} 秒。手机没弹出确认的话，点“放弃这次请求”再重签。` });
+        }
         const snap = imtoken.snapshot();
         if (!snap.match) return send(409, { error: snap.message || "imToken 当前账户不对" });
-        signing = true;
+        const nonce = await pendingNonce();
+        if (abandoned && nonce > abandoned.nonce) {
+          return send(409, {
+            error: `签名账户的 nonce 从 ${abandoned.nonce} 变成了 ${nonce}，被放弃的那次请求可能已经发出。先在 ${EXPLORER[plan.chainId]}/address/${signer} 查最新交易；是这笔就把哈希填到下面，不要重签。`,
+          });
+        }
+        let cancel;
+        const entry = { index, nonce, startedAt: Date.now() };
+        entry.cancelled = new Promise((_, reject) => (cancel = reject));
+        entry.cancel = cancel;
+        pending = entry;
         try {
           const gas = await gasFor(tx);
-          const hash = await imtoken.send(buildSendParams({ from: signer, to: tx.to, data: tx.data, gas }));
-          tx.status = "submitted";
-          tx.hash = hash;
-          tx.error = null;
-          save();
-          track(index, hash);
+          const request = imtoken.send(buildSendParams({ from: signer, to: tx.to, data: tx.data, gas }));
+          request.then((hash) => entry.abandoned && lateResult(entry, hash), () => {});
+          const hash = await Promise.race([request, entry.cancelled]);
+          abandoned = null;
+          record(index, hash);
           return send(200, { ok: true, hash });
         } finally {
-          signing = false;
+          if (pending === entry) pending = null;
         }
       }
       if (req.url === "/submitted") {
         if (!/^0x[0-9a-fA-F]{64}$/.test(input.hash || "")) return send(400, { error: "交易哈希格式不对" });
-        tx.status = "submitted";
-        tx.hash = input.hash;
-        tx.error = null;
-        save();
-        track(index, input.hash);
+        if (pending) abandon("已手动填了哈希，原来那次请求作废。");
+        abandoned = null;
+        record(index, input.hash);
         return send(200, { ok: true });
       }
       return send(404, { error: "not found" });
@@ -181,7 +239,7 @@ export async function servePlan(planPath, { rpc, allowed, port = 8756, onConfirm
   if (projectId) console.log("用手机 imToken 扫签名页上的二维码。手机当前账户必须是上面的地址，网络必须是这条链。私钥不要导入这台电脑。");
   else console.log(wcFallback.message);
   console.log("浏览器插件仍可签名，但插件里的私钥在这台电脑上。");
-  if (nextPending(plan) !== -1) openPage(pageUrl);
+  if (openBrowser && nextPending(plan) !== -1) openPage(pageUrl);
   if (nextPending(plan) === -1) finish(plan);
   process.once("SIGINT", () => {
     console.log("\n已停下。若交易还没成功，用原来的 --resume 打开同一份计划，不要重新生成。");
@@ -231,6 +289,7 @@ td{padding:2px 8px;vertical-align:top}
 <div id="imtoken" class="card"></div>
 <div id="wallet" class="card"><b>或使用这台电脑上的浏览器插件</b><p class="muted">插件里的私钥在这台电脑上。Publisher 请用上面的 imToken。</p><button id="connect">连接插件</button> <span id="who" class="muted"></span></div>
 <div id="txs"></div>
+<div id="manual" class="card"><b>手机已经发出交易、页面没收到？</b><p class="muted">在浏览器里查签名账户的最新交易，把哈希填这里。脚本会核对发送账户、目标合约和 calldata，不对就不算。</p><input id="hash" size="70" placeholder="0x…"> <button class="secondary" id="useHash">登记这个哈希</button></div>
 <script>
 const TOKEN=${JSON.stringify(token)};
 let plan=null, provider=null, busy=false, wc={enabled:false,status:"off",match:false,account:null,message:"",qr:null};
@@ -278,11 +337,23 @@ function render(){
     const link=t.hash?'<br>哈希 <a target=_blank href="'+plan.explorer+"/tx/"+t.hash+'"><code>'+esc(t.hash)+"</code></a>":"";
     const args=t.args.map(a=>'<tr><td class=muted>'+esc(a.name)+" ("+esc(a.type)+')</td><td><code>'+esc(JSON.stringify(a.value))+"</code></td></tr>").join("");
     const mine=t.index===plan.next&&t.status!=="submitted";
-    const im=mine&&wc.match?'<button onclick="signImtoken('+t.index+')" '+(busy?"disabled":"")+">用 imToken 签这一笔</button> ":"";
-    const ext=mine?'<button class=secondary onclick="signExtension('+t.index+')" '+(busy?"disabled":"")+">用浏览器插件签</button>":"";
-    return '<div class=card><b>'+(t.index+1)+". "+esc(t.label)+"</b> "+st+"<br>"+esc(t.contract)+' <code>'+esc(t.to)+"</code><br>函数 <code>"+esc(t.functionName)+"</code><table>"+args+"</table>"+im+ext+link+"</div>";
+    const wait=plan.waiting&&plan.waiting.index===t.index?'<p>已等手机 '+plan.waiting.seconds+' 秒。手机没弹出确认（比如断网），点 <button class=secondary onclick="abandonWc()">放弃这次请求</button>，再重签。</p>':"";
+    const off=busy||plan.waiting?"disabled":"";
+    const im=mine&&wc.match?'<button onclick="signImtoken('+t.index+')" '+off+">用 imToken 签这一笔</button> ":"";
+    const ext=mine?'<button class=secondary onclick="signExtension('+t.index+')" '+off+">用浏览器插件签</button>":"";
+    return '<div class=card><b>'+(t.index+1)+". "+esc(t.label)+"</b> "+st+"<br>"+esc(t.contract)+' <code>'+esc(t.to)+"</code><br>函数 <code>"+esc(t.functionName)+"</code><table>"+args+"</table>"+wait+im+ext+link+"</div>";
   }).join("");
 }
+async function abandonWc(){
+  try{ await post("/wc/abandon",{}); }catch(e){ alert(e.message||e); }
+  await load();
+}
+$("useHash").onclick=async()=>{
+  const hash=$("hash").value.trim();
+  if(!plan||plan.next<0) return alert("没有待签的交易");
+  try{ await post("/submitted",{index:plan.next,hash}); $("hash").value=""; }catch(e){ alert(e.message||e); }
+  await load();
+};
 async function reconnectWc(){
   try{ await post("/wc/reconnect",{}); }catch(e){ alert(e.message||e); }
   await load();

@@ -12,7 +12,7 @@
  *   npm run vercel:mainnet-production -- --apply
  */
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseEnv } from "node:util";
 import { getAddress, parseAbi } from "viem";
@@ -31,7 +31,9 @@ const publicRpc = need(env, "BSC_MAINNET_PUBLIC_RPC");
 if (!publicRpc.startsWith("https://")) throw new Error("BSC_MAINNET_PUBLIC_RPC 必须是 https");
 const startBlock = need(env, "INDEX_START_BLOCK");
 
-const testnet = parseEnv(readFileSync(resolve(ROOT, ".env"), "utf8"));
+const testnetFile = resolve(ROOT, ".env");
+if (!existsSync(testnetFile)) console.warn("没有测试网 .env，跳过“不是测试网地址”这项检查；链 56 字节码检查照常。");
+const testnet = existsSync(testnetFile) ? parseEnv(readFileSync(testnetFile, "utf8")) : {};
 const testAddresses = new Set(Object.entries(testnet).filter(([k, v]) => /^BSC_TESTNET_/.test(k) && /^0x[0-9a-fA-F]{40}$/.test(v)).map(([, v]) => v.toLowerCase()));
 for (const [key, address] of Object.entries(a)) {
   if (testAddresses.has(address.toLowerCase())) throw new Error(`${key} 是测试网地址`);

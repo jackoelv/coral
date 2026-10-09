@@ -50,14 +50,27 @@ if (getAddress(await client.readContract({ address: a.IDO, abi: VAULT, functionN
 const onchainPublisher = getAddress(await client.readContract({ address: a.REWARDS, abi: REWARDS, functionName: "publisher" }));
 if (onchainPublisher !== publisher) throw new Error(`链上 publisher 是 ${onchainPublisher}，不是 MAINNET_PUBLISHER`);
 
-const pgClient = new pg.Client({ connectionString: db.url, ssl: { rejectUnauthorized: false } });
-await pgClient.connect();
+// Neon drops idle connections while the sign page waits for the phone; an unhandled
+// 'error' event would kill the process mid-signing.
+async function connectDb() {
+  const c = new pg.Client({ connectionString: db.url, ssl: { rejectUnauthorized: false } });
+  c.on("error", (error) => console.error(`数据库连接断开（${error.message}）。签名不受影响，签完登记时会重新连接。`));
+  await c.connect();
+  return c;
+}
+
+const pgClient = await connectDb();
 
 async function activate({ plan, tx }) {
   const m = plan.meta;
   const [root, hash, committed] = await Promise.all(["merkleRoot", "contentHash", "committed"].map((fn) => client.readContract({ address: a.REWARDS, abi: REWARDS, functionName: fn })));
   if (root !== m.root || hash !== m.contentHash || committed !== BigInt(m.cumulative)) throw new Error("回执成功，但链上 root / contentHash / committed 和计划不一致，未标记生效");
-  await saveRoot(pgClient, { chainId: 56, idoAddress: a.IDO, root: m.root, contentHash: m.contentHash, cumulativeWei: BigInt(m.cumulative), txHash: tx.hash, proofs: [], active: true });
+  const fresh = await connectDb();
+  try {
+    await saveRoot(fresh, { chainId: 56, idoAddress: a.IDO, root: m.root, contentHash: m.contentHash, cumulativeWei: BigInt(m.cumulative), txHash: tx.hash, proofs: [], active: true });
+  } finally {
+    await fresh.end().catch(() => {});
+  }
   console.log(`root ${m.root} 已在 ${db.name} 库标为生效。交易 ${tx.hash}`);
   writeEvidence("publish-root", { root: m.root, contentHash: m.contentHash, cumulative: m.cumulative, txHash: tx.hash, db: db.name });
 }
@@ -231,5 +244,5 @@ try {
     }
   }
 } finally {
-  await pgClient.end();
+  await pgClient.end().catch(() => {});
 }
