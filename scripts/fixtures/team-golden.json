@@ -1,0 +1,39 @@
+{
+  "unit": "1e18",
+  "notes": "Frozen from CoralIdo.team.t.sol before the team module was removed.",
+  "cases": [
+    {
+      "id": "self500_then_recruit1000",
+      "direct": { "alice": "100" },
+      "team": { "alice": "30" }
+    },
+    {
+      "id": "self30k_then_recruit10k",
+      "direct": { "alice": "1000" },
+      "team": { "alice": "900" }
+    },
+    {
+      "id": "abcd_each_10k",
+      "direct": { "alice": "1000", "bob": "1000", "carol": "1000" },
+      "team": { "alice": "900", "bob": "700", "carol": "700" },
+      "afterB": { "team": { "alice": "700" } },
+      "afterC": { "team": { "alice": "700", "bob": "700" }, "aliceQualBps": 900 }
+    },
+    {
+      "id": "two_max_overlay",
+      "direct": { "alice": "6000", "bob": "1000" },
+      "team": { "alice": "6100", "bob": "1000" },
+      "lastTxTeamPlusDirect": "2100"
+    },
+    {
+      "id": "overlay_nearest_not_root",
+      "teamDeltaOnD": { "carol": "1000", "bob": "100", "alice": "0" },
+      "directOnD": { "carol": "1000" }
+    },
+    {
+      "id": "single_max_no_overlay",
+      "direct": { "alice": "1000" },
+      "team": { "alice": "1000" }
+    }
+  ]
+}

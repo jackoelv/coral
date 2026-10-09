@@ -1,0 +1,4 @@
+{
+  "recommendations": ["NomicFoundation.hardhat-solidity"],
+  "unwantedRecommendations": ["JuanBlanco.solidity"]
+}
