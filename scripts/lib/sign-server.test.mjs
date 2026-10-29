@@ -11,7 +11,10 @@ test("sign page offers imToken and still sends the extension transaction with ga
   const html = renderSignPage("abc");
   assert.match(html, /用手机 imToken 签名/);
   assert.match(html, /signImtoken/);
-  assert.match(html, /用浏览器插件签/);
+  assert.match(html, /连接币安钱包/);
+  assert.match(html, /连接 OKX 钱包/);
+  assert.match(html, /okxwallet/);
+  assert.match(html, /用已连接的钱包签/);
   assert.match(html, /eth_sendTransaction/);
   assert.match(html, /gas:pre\.gas/);
   assert.match(html, /accounts\[0\]/);
@@ -69,7 +72,7 @@ function fakePhone() {
   return { calls, open: async () => session };
 }
 
-async function setup(port) {
+async function setup(port, overrides = {}) {
   const dir = mkdtempSync(join(tmpdir(), "sign-server-"));
   const planPath = join(dir, "plan.json");
   const plan = buildPlan({
@@ -82,7 +85,7 @@ async function setup(port) {
   const confirmed = [];
   const served = servePlan(planPath, {
     rpc: chain.url, allowed: [TARGET], port, walletConnectProjectId: "0".repeat(32),
-    openSession: phone.open, openBrowser: false, onConfirmed: ({ tx }) => confirmed.push(tx.hash),
+    openSession: phone.open, openBrowser: false, onConfirmed: ({ tx }) => confirmed.push(tx.hash), ...overrides,
   });
   const base = `http://127.0.0.1:${port}`;
   let token = null;
@@ -182,4 +185,30 @@ test("a confirmed tx stays success when the follow-up database step fails", { ti
     chain.close();
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+
+test("airdrop guard fixes nonce; failed registration blocks signing until reconcile succeeds", {timeout:30000}, async()=>{
+  let registered=false, attempts=0;
+  const s=await setup(18764, {
+    beforeSend: async ({tx})=>{tx.nonce=3; return {nonce:'0x3'};},
+    onConfirmed: async()=>{attempts++; if(!registered) throw new Error('test DB offline');},
+  });
+  try {
+    const pending=s.post('/wc/sign',{index:0});
+    await s.waitFor(()=>s.phone.calls.length===1);
+    assert.equal(s.phone.calls[0].tx.nonce,'0x3');
+    s.chain.state.broadcast.add(HASH_A); s.chain.state.nonce=4;
+    s.phone.calls[0].resolve(HASH_A); await pending;
+    await s.waitFor(()=>attempts===1);
+    assert.equal((await s.plan()).txs[0].status,'submitted');
+    assert.equal((await s.post('/wc/sign',{index:0})).status,409);
+    assert.equal((await s.post('/estimate',{index:0})).status,409);
+    registered=true;
+    assert.equal((await s.post('/reconcile',{index:0})).status,200);
+    await s.served;
+    assert.equal(s.phone.calls.length,1);
+    assert.equal(readPlan(s.planPath).txs[0].status,'success');
+    assert.equal(attempts,2);
+  } finally { s.cleanup(); }
 });

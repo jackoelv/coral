@@ -16,7 +16,7 @@ const EXPLORER = { 56: "https://bscscan.com", 97: "https://testnet.bscscan.com" 
  * times 1.5, and only a successful receipt counts.
  * Resolves once every tx in the plan has a successful receipt.
  */
-export async function servePlan(planPath, { rpc, allowed, port = 8756, onConfirmed, walletConnectProjectId: rawProjectId = "", openSession = openImtokenSession, openBrowser = true } = {}) {
+export async function servePlan(planPath, { rpc, allowed, port = 8756, onConfirmed, beforeSend, walletConnectProjectId: rawProjectId = "", openSession = openImtokenSession, openBrowser = true } = {}) {
   let plan = readPlan(planPath);
   const client = createPublicClient({ transport: http(rpc, { retryCount: 2, timeout: 30_000 }) });
   if ((await client.getChainId()) !== plan.chainId) throw new Error(`RPC 不是计划要求的 chainId ${plan.chainId}`);
@@ -43,6 +43,7 @@ export async function servePlan(planPath, { rpc, allowed, port = 8756, onConfirm
     explorer: EXPLORER[plan.chainId],
     next: nextPending(plan),
     txs: checkPlan(plan, allowed).map((row, i) => ({ ...row, error: plan.txs[i].error || null })),
+    canReconcile: Boolean(beforeSend),
     waiting: pending ? { index: pending.index, seconds: Math.round((Date.now() - pending.startedAt) / 1000) } : null,
   });
 
@@ -109,12 +110,31 @@ export async function servePlan(planPath, { rpc, allowed, port = 8756, onConfirm
     });
   }
 
+  let preparing = false;
+  async function prepareSend(index) {
+    if (preparing) throw new Error("签名前检查进行中，请勿重复点击");
+    preparing = true;
+    try {
+      const tx = plan.txs[index];
+      const gas = await gasFor(tx);
+      const extra = beforeSend ? await beforeSend({ plan, index, tx, client }) : {};
+      save();
+      return { to: tx.to, data: tx.data, gas, ...extra };
+    } finally { preparing = false; }
+  }
+
   async function gasFor(tx) {
     const estimated = await client.estimateGas({ account: signer, to: tx.to, data: tx.data });
     return gasCeiling(estimated);
   }
 
+  const tracking = new Set();
   async function track(index, hash) {
+    if (tracking.has(index)) return;
+    tracking.add(index);
+    try { await trackOnce(index, hash); } finally { tracking.delete(index); }
+  }
+  async function trackOnce(index, hash) {
     const tx = plan.txs[index];
     let receipt;
     try {
@@ -135,7 +155,7 @@ export async function servePlan(planPath, { rpc, allowed, port = 8756, onConfirm
       save();
       console.log(`${tx.label} ${tx.status} ${hash}`);
     } catch (error) {
-      tx.status = "failed";
+      tx.status = beforeSend && tx.hash ? "submitted" : "failed";
       tx.error = error.message || String(error);
       save();
       console.error(`${tx.label} ${tx.error}`);
@@ -144,7 +164,9 @@ export async function servePlan(planPath, { rpc, allowed, port = 8756, onConfirm
     if (tx.status === "success" && onConfirmed) {
       try {
         await onConfirmed({ plan, index, tx, receipt });
+        save();
       } catch (error) {
+        if (beforeSend) { tx.status = "submitted"; tx.error = `已上链，待登记：${error.message}`; save(); }
         console.error(`${tx.label} 链上已成功（${hash}），但后续登记失败：${error.message || error}。用原来的 --resume 打开同一份计划补登记，不要重新签。`);
       }
     }
@@ -182,9 +204,13 @@ export async function servePlan(planPath, { rpc, allowed, port = 8756, onConfirm
       const index = Number(input.index);
       if (index !== nextPending(plan)) return send(409, { error: "只能按顺序签下一笔" });
       const tx = plan.txs[index];
+      if (req.url === "/reconcile" && beforeSend && tx.hash) {
+        track(index, tx.hash);
+        return send(200, { ok: true });
+      }
       if (tx.status === "submitted") return send(409, { error: "这笔已提交，等回执" });
       if (req.url === "/estimate") {
-        return send(200, { to: tx.to, data: tx.data, gas: await gasFor(tx) });
+        return send(200, await prepareSend(index));
       }
       if (req.url === "/wc/sign") {
         if (!imtoken) return send(409, { error: wcView().message || "imToken 还没连上" });
@@ -206,8 +232,8 @@ export async function servePlan(planPath, { rpc, allowed, port = 8756, onConfirm
         entry.cancel = cancel;
         pending = entry;
         try {
-          const gas = await gasFor(tx);
-          const request = imtoken.send(buildSendParams({ from: signer, to: tx.to, data: tx.data, gas }));
+          const prepared = await prepareSend(index);
+          const request = imtoken.send({ ...buildSendParams({ from: signer, to: tx.to, data: tx.data, gas: prepared.gas }), ...(prepared.nonce ? { nonce: prepared.nonce } : {}) });
           request.then((hash) => entry.abandoned && lateResult(entry, hash), () => {});
           const hash = await Promise.race([request, entry.cancelled]);
           abandoned = null;
@@ -287,23 +313,61 @@ td{padding:2px 8px;vertical-align:top}
 <h2>链上交易签名</h2>
 <div id="head" class="card"></div>
 <div id="imtoken" class="card"></div>
-<div id="wallet" class="card"><b>或使用这台电脑上的浏览器插件</b><p class="muted">插件里的私钥在这台电脑上。Publisher 请用上面的 imToken。</p><button id="connect">连接插件</button> <span id="who" class="muted"></span></div>
+<div id="wallet" class="card"><b>或使用这台电脑上的币安钱包、OKX 钱包</b><p class="muted">插件里的私钥在这台电脑上。先点下面的按钮连接。钱包当前账户必须是上面的签名人；币安和 OKX 都按当前账户签名。</p><button type="button" id="connect-binance">连接币安钱包</button> <button type="button" class="secondary" id="connect-okx">连接 OKX 钱包</button> <span id="who" class="muted"></span></div>
 <div id="txs"></div>
 <div id="manual" class="card"><b>手机已经发出交易、页面没收到？</b><p class="muted">在浏览器里查签名账户的最新交易，把哈希填这里。脚本会核对发送账户、目标合约和 calldata，不对就不算。</p><input id="hash" size="70" placeholder="0x…"> <button class="secondary" id="useHash">登记这个哈希</button></div>
 <script>
 const TOKEN=${JSON.stringify(token)};
-let plan=null, provider=null, busy=false, wc={enabled:false,status:"off",match:false,account:null,message:"",qr:null};
+let plan=null, provider=null, walletName="", busy=false, wc={enabled:false,status:"off",match:false,account:null,message:"",qr:null};
 const $=id=>document.getElementById(id);
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
-function pick(){
-  const w=window;
-  if(w.binancew3w&&w.binancew3w.ethereum) return w.binancew3w.ethereum;
-  const list=(w.ethereum&&w.ethereum.providers)||[];
-  const bn=list.find(p=>p.isBinance||p.isBinanceWallet);
-  if(bn) return bn;
-  if(w.ethereum&&(w.ethereum.isBinance||w.ethereum.isBinanceWallet)) return w.ethereum;
-  if(w.BinanceChain) return w.BinanceChain;
-  return w.ethereum||null;
+const announced=[];
+window.addEventListener("eip6963:announceProvider",function(event){
+  const detail=event.detail;
+  if(detail&&detail.provider&&typeof detail.provider.request==="function") announced.push(detail);
+});
+try{window.dispatchEvent(new Event("eip6963:requestProvider"));}catch(e){}
+function walletKind(detail){
+  const info=detail.info||{};
+  const text=String((info.rdns||"")+" "+(info.name||"")).toLowerCase();
+  const p=detail.provider||{};
+  if(text.indexOf("okx")>=0||text.indexOf("okex")>=0||p.isOkxWallet||p.isOKExWallet) return "okx";
+  if(text.indexOf("binance")>=0||p.isBinance||p.isBinanceWallet) return "binance";
+  return "";
+}
+function addWallet(list,kind,name,p){
+  if(!p||typeof p.request!=="function") return;
+  if(list.some(function(x){return x.kind===kind||x.provider===p;})) return;
+  list.push({kind:kind,name:name,provider:p});
+}
+function wallets(){
+  const w=window, list=[];
+  announced.forEach(function(detail){
+    const kind=walletKind(detail);
+    if(kind==="okx") addWallet(list,"okx","OKX 钱包",detail.provider);
+    if(kind==="binance") addWallet(list,"binance","币安钱包",detail.provider);
+  });
+  addWallet(list,"okx","OKX 钱包",w.okxwallet);
+  const w3w=w.binancew3w;
+  if(w3w) addWallet(list,"binance","币安钱包",w3w.ethereum||(w3w.providers&&w3w.providers.ethereum)||(typeof w3w.request==="function"?w3w:null));
+  addWallet(list,"binance","币安钱包",w.BinanceChain);
+  const multi=(w.ethereum&&w.ethereum.providers)||[];
+  multi.forEach(function(p){
+    if(p.isOkxWallet||p.isOKExWallet) addWallet(list,"okx","OKX 钱包",p);
+    else if(p.isBinance||p.isBinanceWallet) addWallet(list,"binance","币安钱包",p);
+  });
+  const eth=w.ethereum;
+  if(eth){
+    if(eth.isOkxWallet||eth.isOKExWallet) addWallet(list,"okx","OKX 钱包",eth);
+    if(eth.isBinance||eth.isBinanceWallet) addWallet(list,"binance","币安钱包",eth);
+  }
+  return list;
+}
+function selectWallet(kind){
+  const found=wallets().find(function(x){return x.kind===kind;});
+  if(!found) throw new Error(kind==="okx"?"没有检测到 OKX 钱包。请确认 Chrome 已启用 OKX 钱包，然后刷新本页。":"没有检测到币安钱包。请确认 Chrome 已启用币安钱包，然后刷新本页。");
+  provider=found.provider;
+  walletName=found.name;
 }
 async function post(path,body){
   const r=await fetch(path,{method:"POST",headers:{"content-type":"application/json","x-sign-token":TOKEN},body:JSON.stringify(body)});
@@ -333,16 +397,21 @@ function render(){
   $("head").innerHTML="<b>"+esc(plan.purpose)+"</b><br>签名人（"+esc(plan.signerRole)+'）：<code>'+esc(plan.signer)+"</code><br>链："+plan.chainId;
   renderImtoken();
   $("txs").innerHTML=plan.txs.map(t=>{
-    const st=t.status==="success"?'<span class=ok>已成功</span>':t.status==="submitted"?"等待回执…":(t.status==="reverted"||t.status==="failed")?'<span class=bad>'+esc(t.error||t.status)+"</span>":"待签";
+    const st=t.status==="success"?'<span class=ok>已成功</span>':t.status==="submitted"?(t.error?'<span class=bad>'+esc(t.error)+"</span>":"等待回执…"):(t.status==="reverted"||t.status==="failed")?'<span class=bad>'+esc(t.error||t.status)+"</span>":"待签";
     const link=t.hash?'<br>哈希 <a target=_blank href="'+plan.explorer+"/tx/"+t.hash+'"><code>'+esc(t.hash)+"</code></a>":"";
     const args=t.args.map(a=>'<tr><td class=muted>'+esc(a.name)+" ("+esc(a.type)+')</td><td><code>'+esc(JSON.stringify(a.value))+"</code></td></tr>").join("");
+    const repair=plan.canReconcile&&t.index===plan.next&&t.hash&&t.status==="submitted"?'<button class=secondary onclick="reconcile('+t.index+')">重新核验 / 补登记</button>':"";
     const mine=t.index===plan.next&&t.status!=="submitted";
     const wait=plan.waiting&&plan.waiting.index===t.index?'<p>已等手机 '+plan.waiting.seconds+' 秒。手机没弹出确认（比如断网），点 <button class=secondary onclick="abandonWc()">放弃这次请求</button>，再重签。</p>':"";
     const off=busy||plan.waiting?"disabled":"";
     const im=mine&&wc.match?'<button onclick="signImtoken('+t.index+')" '+off+">用 imToken 签这一笔</button> ":"";
-    const ext=mine?'<button class=secondary onclick="signExtension('+t.index+')" '+off+">用浏览器插件签</button>":"";
-    return '<div class=card><b>'+(t.index+1)+". "+esc(t.label)+"</b> "+st+"<br>"+esc(t.contract)+' <code>'+esc(t.to)+"</code><br>函数 <code>"+esc(t.functionName)+"</code><table>"+args+"</table>"+wait+im+ext+link+"</div>";
+    const ext=mine?'<button class=secondary onclick="signExtension('+t.index+')" '+off+">用已连接的钱包签</button>":"";
+    return '<div class=card><b>'+(t.index+1)+". "+esc(t.label)+"</b> "+st+"<br>"+esc(t.contract)+' <code>'+esc(t.to)+"</code><br>函数 <code>"+esc(t.functionName)+"</code><table>"+args+"</table>"+wait+repair+im+ext+link+"</div>";
   }).join("");
+}
+async function reconcile(index){
+  try{ await post("/reconcile",{index}); }catch(e){ alert(e.message||e); }
+  await load();
 }
 async function abandonWc(){
   try{ await post("/wc/abandon",{}); }catch(e){ alert(e.message||e); }
@@ -359,12 +428,11 @@ async function reconnectWc(){
   await load();
 }
 async function ensureAccountAndChain(){
-  provider=provider||pick();
-  if(!provider) throw new Error("没有检测到钱包插件");
+  if(!provider) throw new Error("请先连接币安钱包或 OKX 钱包");
   const accounts=await provider.request({method:"eth_requestAccounts"});
   const active=(accounts&&accounts[0])||"";
-  $("who").textContent="钱包当前账户 "+active;
-  if(active.toLowerCase()!==plan.signer.toLowerCase()) throw new Error("钱包当前账户是 "+active+"，请在插件里切换到 "+plan.signer+" 后重试");
+  $("who").textContent=walletName+" 当前账户 "+active;
+  if(active.toLowerCase()!==plan.signer.toLowerCase()) throw new Error(walletName+" 当前账户是 "+active+"，请在这个钱包里切换到 "+plan.signer+" 后重试");
   let cid=await provider.request({method:"eth_chainId"});
   if(String(cid).toLowerCase()!==plan.chainHex){
     await provider.request({method:"wallet_switchEthereumChain",params:[{chainId:plan.chainHex}]});
@@ -373,7 +441,16 @@ async function ensureAccountAndChain(){
   }
   return active;
 }
-$("connect").onclick=async()=>{ try{ await ensureAccountAndChain(); $("who").className="ok"; }catch(e){ $("who").className="bad"; $("who").textContent=e.message||e; } };
+async function connectKind(kind){
+  try{
+    if(!wallets().some(function(x){return x.kind===kind;})) await new Promise(function(r){setTimeout(r,400);});
+    selectWallet(kind);
+    await ensureAccountAndChain();
+    $("who").className="ok";
+  }catch(e){ $("who").className="bad"; $("who").textContent=e.message||e; }
+}
+$("connect-binance").onclick=function(){ connectKind("binance"); };
+$("connect-okx").onclick=function(){ connectKind("okx"); };
 async function signImtoken(index){
   if(busy) return; busy=true; render();
   try{ await post("/wc/sign",{index}); }
@@ -385,7 +462,7 @@ async function signExtension(index){
   try{
     const from=await ensureAccountAndChain();
     const pre=await post("/estimate",{index});
-    const hash=await provider.request({method:"eth_sendTransaction",params:[{from,to:pre.to,data:pre.data,value:"0x0",gas:pre.gas}]});
+    const hash=await provider.request({method:"eth_sendTransaction",params:[{from,to:pre.to,data:pre.data,value:"0x0",gas:pre.gas,...(pre.nonce?{nonce:pre.nonce}:{})}]});
     await post("/submitted",{index,hash});
   }catch(e){ alert(e.message||e); }
   busy=false; await load();

@@ -43,3 +43,15 @@ SECURITY-AUDIT*.md
 test/audit/
 scripts/lib/mainnet.test.mjs
 scripts/lib/testnet-ops.test.mjs
+
+# Private airdrop recipient CSVs
+/activity/
+
+# Local CKEY holder snapshots (sqlite and excel)
+/ckey-snapshots/
+
+# Local operator notes. Do not commit.
+/本地操作指南.md
+
+# Local audits (opening promo, manual reconciliation). Do not commit.
+/local-audit/

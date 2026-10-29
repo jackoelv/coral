@@ -1,16 +1,16 @@
 ---
-description: 发 root、索引、结算前先确认 preview 还是正式库
+description: 发 root、索引、结算前先确认 production 还是 preview 库
 alwaysApply: true
 ---
 
-# Coral 数据库环境（短期，2026-10-08）
+# Coral 数据库环境（短期，2026-10-10）
 
 原文在知识库 `source/notes/2026-10-08-nemo-preview-db-env.md`。环境切换后先改原文。
 
-当前声明的工作环境是 **preview**。索引、结算、发布 root、核对 root 之前，先说出这次的库名，再执行。
+当前声明的工作环境是 **production**（库名 `production`）。索引、结算、发布 root、核对 root 之前，先说出这次的库名，再执行。
 
-正式库是 `DATABASE_URL` 的 `neondb`（主机 `ep-autumn-cake`）。preview 库是 `PREVIEW_DATABASE_URL` 的 `preview`。奖励合约只有一个，链上 `publishRoot` 会覆盖当前 root。
+正式库是 `.env.mainnet` 里 `DATABASE_URL` 指向的 `production`（用户 `production_app`，主机 `ep-autumn-cake`）。preview 库是 `PREVIEW_DATABASE_URL` 的 `preview`。旧正式库 `neondb` 已停用，脚本拒绝连接，连接串留在 `RETIRED_NEONDB_DATABASE_URL`。奖励合约只有一个，链上 `publishRoot` 会覆盖当前 root。
 
-npm 会吃掉 `--db`。使用 `npm run <命令> -- --db preview`。不带 `--db` 就是正式库。单独的 `preview` 参数会被脚本拒绝。
+npm 会吃掉 `--db`。使用 `npm run <命令> -- --db preview`。不带 `--db` 就是 production 库。单独的 `preview` 参数会被脚本拒绝。
 
-链上和 preview 库现在都是 179 USDT 的 root `0x4506c88d3b112613d05722f9bbde9628f0e70cdbdbffffaaef05aea41353e6aa`。20 USDT 的 root `0x59e88425…` 已在 preview 标为不生效。不要再用它覆盖链上 179。环境切换后改写这一条。
+两个库的奖励表已改名为 `coral_*`。链上当前 root `0xf910f6a5…4431`（6 USDT），两库都标为生效。旧合约的 179 和 20 两个 root 已过期。环境切换后改写这一条。

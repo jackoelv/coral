@@ -13,6 +13,7 @@ import { resolve } from "node:path";
 import { parseEnv } from "node:util";
 import { getAddress } from "viem";
 import { ROOT, contracts, need, oldContracts, readMainnetEnv } from "./lib/mainnet.mjs";
+
 import { readPlan } from "./lib/sign-plan.mjs";
 import { servePlan } from "./lib/sign-server.mjs";
 
@@ -20,6 +21,7 @@ const file = process.argv.slice(2).find((arg) => !arg.startsWith("--"));
 if (!file) throw new Error("用法：npm run sign:mainnet -- mainnet-run/plans/<计划>.json");
 const path = resolve(file);
 const plan = readPlan(path);
+if (plan.meta?.kind === "ckeyBatchTransfer") throw new Error("空投计划用 npm run ckey:batch-transfer -- --resume <计划>，补登记用 --record-only <计划>；不要绕过防重执行器");
 if (plan.meta?.kind === "publishRoot") throw new Error("这是发布 root 的计划，用 npm run publish:mainnet -- --resume <计划> 继续，签完才会把 root 标为生效");
 
 let rpc;
@@ -45,4 +47,5 @@ if (plan.chainId === 56) {
 }
 const port = process.argv.includes("--port") ? Number(process.argv[process.argv.indexOf("--port") + 1]) : 8756;
 await servePlan(path, { rpc, allowed, port, walletConnectProjectId });
+
 console.log("计划里的交易都已成功。");

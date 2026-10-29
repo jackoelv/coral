@@ -4,8 +4,8 @@
  * in the local sign page. Proofs are saved inactive first; the root becomes active in the database
  * only after a successful receipt and an on-chain check.
  *
- *   npm run publish:mainnet                          preview, compares the chain root, checks the 25% cap and maxRootIncrease
- *   npm run publish:mainnet -- --apply               same comparison; skip the signature when the chain already matches
+ *   npm run publish:mainnet                          production, print only; compares the chain root, checks the 25% cap and maxRootIncrease
+ *   npm run publish:mainnet -- --apply               same comparison; open the sign page when the chain differs
  *   npm run publish:mainnet -- --content-uri         publish only the leaf-file URL, and only when the root already matches
  *   npm run publish:mainnet -- --content-uri --apply sign that URL; root, contentHash and cumulative stay the same
  *   npm run publish:mainnet -- --resume <plan>       reopen the same plan after a failed or closed signing
@@ -45,7 +45,7 @@ const client = await mainnetClient(env);
 const a = contracts(env);
 const { publisher } = roles(env, { requirePublisher: true });
 const db = selectedDatabase(env);
-console.log(`当前数据库：${db.name}（库名 ${db.target.database}，主机 ${db.target.host}）。${db.name === "production" ? "这是正式库 neondb，不是 preview。" : "这是 preview 库，不是正式库 neondb。链是同一条主网。"}`);
+console.log(`当前数据库：${db.name}（库名 ${db.target.database}，主机 ${db.target.host}）。${db.name === "production" ? "这是正式库 production。" : "这是 preview 库。"}发布会覆盖链上当前 root。`);
 if (getAddress(await client.readContract({ address: a.IDO, abi: VAULT, functionName: "rewards" })) !== a.REWARDS) throw new Error("金库的 rewards 不是 BSC_MAINNET_REWARDS");
 const onchainPublisher = getAddress(await client.readContract({ address: a.REWARDS, abi: REWARDS, functionName: "publisher" }));
 if (onchainPublisher !== publisher) throw new Error(`链上 publisher 是 ${onchainPublisher}，不是 MAINNET_PUBLISHER`);
