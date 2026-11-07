@@ -22,6 +22,7 @@ import { ensureSchema, loadAccounts, lockName, saveRoot, tryLock, unlock } from 
 import { buildPlan, planTx, readPlan, writePlan } from "./lib/sign-plan.mjs";
 import { servePlan } from "./lib/sign-server.mjs";
 import { contracts, json, mainnetClient, need, readMainnetEnv, roles, runPath, selectedDatabase, writeEvidence } from "./lib/mainnet.mjs";
+import { directBpsProblem } from "./lib/team-reward.mjs";
 
 const REWARDS = parseAbi([
   "function publisher() view returns (address)",
@@ -33,7 +34,11 @@ const REWARDS = parseAbi([
   "function maxRootIncrease() view returns (uint256)",
   "function rewardCap() view returns (uint256)",
 ]);
-const VAULT = parseAbi(["function totalDirectAccrued() view returns (uint256)", "function rewards() view returns (address)"]);
+const VAULT = parseAbi([
+  "function totalDirectAccrued() view returns (uint256)",
+  "function directReferralBps() view returns (uint256)",
+  "function rewards() view returns (address)",
+]);
 const PUBLISH = "function publishRoot(bytes32 root, bytes32 contentHash, uint256 cumulative, string uri)";
 
 const args = process.argv.slice(2);
@@ -153,7 +158,11 @@ try {
     const contentHash = keccak256(toBytes(JSON.stringify(entries.map((e) => [e.account, e.cumulative.toString()]))));
     const [committed, paid, maxIncrease, cap] = await Promise.all(["committed", "totalTeamPaid", "maxRootIncrease", "rewardCap"].map((fn) => client.readContract({ address: a.REWARDS, abi: REWARDS, functionName: fn })));
     const direct = await client.readContract({ address: a.IDO, abi: VAULT, functionName: "totalDirectAccrued" });
+    const onChainDirectBps = await client.readContract({ address: a.IDO, abi: VAULT, functionName: "directReferralBps" });
+    const head = await client.getBlockNumber();
     const problems = [];
+    const bpsProblem = directBpsProblem(onChainDirectBps, head, env.TEAM_TIER_V3_BLOCK || "");
+    if (bpsProblem) problems.push(bpsProblem);
     if (cumulative < paid) problems.push(`累计 ${cumulative} 小于链上已支付 ${paid}`);
     if (direct + cumulative > cap) problems.push(`直推 + 网体累计 ${direct + cumulative} 超过 25% 帽 ${cap}`);
     if (maxIncrease === 0n) problems.push("链上 maxRootIncrease 是 0，主网必须限额");

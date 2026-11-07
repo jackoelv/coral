@@ -56,6 +56,16 @@ CREATE TABLE IF NOT EXISTS coral_team_proof (
   proof jsonb NOT NULL,
   PRIMARY KEY (chain_id, ido_address, root, wallet)
 );
+CREATE TABLE IF NOT EXISTS coral_reward_role (
+  chain_id bigint NOT NULL,
+  ido_address text NOT NULL,
+  wallet text NOT NULL,
+  role text NOT NULL,
+  effective_block bigint NOT NULL,
+  note text NOT NULL DEFAULT '',
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (chain_id, ido_address, wallet)
+);
 `;
 
 const SCOPED_KEYS = {
@@ -92,13 +102,17 @@ export async function unlock(client, name) {
 
 export async function ensureSchema(client) {
   await client.query(SCHEMA_SQL);
-  for (const [table, cols] of Object.entries(SCOPED_KEYS)) {
+  for (const table of Object.keys(SCOPED_KEYS)) {
     await client.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ido_address text NOT NULL DEFAULT ''`);
     if (table === "coral_team_account") {
       await client.query(
         `ALTER TABLE coral_team_account ADD COLUMN IF NOT EXISTS historical_team_reward_wei text NOT NULL DEFAULT '0'`,
       );
     }
+  }
+  await client.query(`ALTER TABLE coral_indexer_state ADD COLUMN IF NOT EXISTS direct_bps text NOT NULL DEFAULT '1000'`);
+  await client.query(`ALTER TABLE coral_indexer_state ADD COLUMN IF NOT EXISTS direct_bps_block bigint`);
+  for (const [table, cols] of Object.entries(SCOPED_KEYS)) {
     const { rows } = await client.query(
       `SELECT a.attname
        FROM pg_index i
@@ -115,7 +129,7 @@ export async function ensureSchema(client) {
 
 export async function loadCheckpoint(client, chainId, idoAddress) {
   const { rows } = await client.query(
-    `SELECT last_block, rewards_address FROM coral_indexer_state WHERE chain_id = $1 AND ido_address = $2`,
+    `SELECT last_block, rewards_address, direct_bps, direct_bps_block FROM coral_indexer_state WHERE chain_id = $1 AND ido_address = $2`,
     [chainId, idoAddress],
   );
   return rows[0] || null;
@@ -140,6 +154,27 @@ export function stateFromRows(rows) {
   return state;
 }
 
+export async function loadRoles(client, chainId, idoAddress) {
+  const { rows } = await client.query(
+    `SELECT wallet, role, effective_block, note
+     FROM coral_reward_role WHERE chain_id = $1 AND ido_address = $2`,
+    [chainId, idoAddress],
+  );
+  return rows;
+}
+
+export function applyRoles(state, rows) {
+  if (!state.roles) state.roles = new Map();
+  for (const row of rows) {
+    state.roles.set(getAddress(row.wallet), {
+      role: row.role,
+      effectiveBlock: BigInt(row.effective_block),
+      effectiveUnix: null,
+      note: row.note || "",
+    });
+  }
+}
+
 export async function loadAccounts(client, chainId, idoAddress) {
   const { rows } = await client.query(
     `SELECT wallet, referrer, self_wei, team_wei, team_reward_wei, historical_team_reward_wei, direct_wei, claimed_wei
@@ -149,19 +184,21 @@ export async function loadAccounts(client, chainId, idoAddress) {
   return rows;
 }
 
-export async function saveIndex(client, { chainId, idoAddress, rewardsAddress, lastBlock, rows }) {
+export async function saveIndex(client, { chainId, idoAddress, rewardsAddress, lastBlock, rows, directBps = 1000n, directBpsBlock = null }) {
   await client.query("BEGIN");
   try {
     const advanced = await client.query(
-      `INSERT INTO coral_indexer_state (chain_id, ido_address, rewards_address, last_block)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO coral_indexer_state (chain_id, ido_address, rewards_address, last_block, direct_bps, direct_bps_block)
+       VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (chain_id, ido_address)
        DO UPDATE SET rewards_address = EXCLUDED.rewards_address,
                      last_block = EXCLUDED.last_block,
+                     direct_bps = EXCLUDED.direct_bps,
+                     direct_bps_block = EXCLUDED.direct_bps_block,
                      updated_at = now()
        WHERE coral_indexer_state.last_block < EXCLUDED.last_block
        RETURNING last_block`,
-      [chainId, idoAddress, rewardsAddress, lastBlock],
+      [chainId, idoAddress, rewardsAddress, lastBlock, directBps.toString(), directBpsBlock == null ? null : directBpsBlock.toString()],
     );
     if (advanced.rowCount === 0) {
       await client.query("ROLLBACK");

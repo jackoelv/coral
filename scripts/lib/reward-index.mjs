@@ -1,5 +1,5 @@
 import { getAddress } from "viem";
-import { bind, contribute, createState, noteImportedSelf, tiersForBlock } from "./team-reward.mjs";
+import { bind, contribute, createState, DIRECT_BPS, noteImportedSelf, rewardOptionsForBlock } from "./team-reward.mjs";
 
 function addr(value) {
   if (!value || value === "0x0000000000000000000000000000000000000000") return null;
@@ -35,12 +35,24 @@ export function applyLog(state, log) {
     noteImportedSelf(state, account, log.args.selfVolume);
     return;
   }
+  if (name === "DirectReferralBpsUpdated") {
+    const bps = BigInt(log.args.bps);
+    if (bps !== 1000n && bps !== 500n) {
+      if (!state.directBpsProblems) state.directBpsProblems = [];
+      state.directBpsProblems.push(`区块 ${log.blockNumber} 直推比例是 ${bps}，只接受 1000 或 500`);
+    }
+    state.directBps = bps;
+    state.directBpsBlock = BigInt(log.blockNumber);
+    return;
+  }
   if (name === "Contributed") {
     const account = key(log.args.account);
     if (!state.referrer.has(account)) bind(state, account, null);
-    contribute(state, account, BigInt(log.args.amount), {
-      tiers: tiersForBlock(log.blockNumber, state.tierSwitchBlock),
+    const opts = rewardOptionsForBlock(log.blockNumber, {
+      tierSwitchBlock: state.tierSwitchBlock,
+      tierV3Block: state.tierV3Block,
     });
+    contribute(state, account, BigInt(log.args.amount), { ...opts, directBps: state.directBps ?? DIRECT_BPS });
     return;
   }
   if (name === "TeamClaimed") {
@@ -54,7 +66,15 @@ export function applyLog(state, log) {
 export function emptyIndexState() {
   const state = createState();
   state.claimed = new Map();
+  state.directBps = DIRECT_BPS;
+  state.directBpsBlock = null;
   return state;
+}
+
+export function restoreDirectBps(state, checkpoint) {
+  const raw = checkpoint?.direct_bps;
+  state.directBps = raw == null || raw === "" ? DIRECT_BPS : BigInt(raw);
+  state.directBpsBlock = checkpoint?.direct_bps_block == null ? null : BigInt(checkpoint.direct_bps_block);
 }
 
 export function accountRows(state) {

@@ -11,11 +11,13 @@
  *   ... node scripts/index-rewards.mjs --follow
  */
 import { createPublicClient, http, parseAbiItem, getAddress } from "viem";
-import { accountRows, applyLog, formatIndexProgress, isArchiveLogRpc, isGetLogsLimit, isLogRpcTimeout, logQueryWindows, logRpcCandidates, logRpcFailure, planChunk, rpcErrorText, rpcLabel, sortLogs } from "./lib/reward-index.mjs";
+import { accountRows, applyLog, formatIndexProgress, isArchiveLogRpc, isGetLogsLimit, isLogRpcTimeout, logQueryWindows, logRpcCandidates, logRpcFailure, planChunk, restoreDirectBps, rpcErrorText, rpcLabel, sortLogs } from "./lib/reward-index.mjs";
 import {
   ensureSchema,
   loadAccounts,
   loadCheckpoint,
+  loadRoles,
+  applyRoles,
   lockName,
   saveIndex,
   stateFromRows,
@@ -30,6 +32,7 @@ const IDO_EVENTS = [
   parseAbiItem("event ReferrerImported(address indexed account, address indexed referrer)"),
   parseAbiItem("event VolumeImported(address indexed account, uint256 selfVolume)"),
   parseAbiItem("event Contributed(address indexed account, uint256 amount, uint256 selfVolume, uint256 nemoAmount)"),
+  parseAbiItem("event DirectReferralBpsUpdated(uint256 bps)"),
 ];
 const REWARD_EVENTS = [
   parseAbiItem("event TeamClaimed(address indexed account, uint256 cumulative, uint256 paid)"),
@@ -193,7 +196,10 @@ async function indexOnce(client) {
 
     const stored = await loadAccounts(client, chainId, ido);
     const state = stateFromRows(stored);
+    restoreDirectBps(state, checkpoint);
     state.tierSwitchBlock = process.env.TEAM_TIER_SWITCH_BLOCK || "";
+    state.tierV3Block = process.env.TEAM_TIER_V3_BLOCK || "";
+    applyRoles(state, await loadRoles(client, chainId, ido));
     const origin = planChunk({ lastBlock: last, startBlock, safeHead, chunkBlocks }).from;
     const startedAt = Date.now();
     console.log(
@@ -215,6 +221,8 @@ async function indexOnce(client) {
         rewardsAddress: rewards,
         lastBlock: Number(range.end),
         rows: accountRows(state),
+        directBps: state.directBps,
+        directBpsBlock: state.directBpsBlock,
       });
       if (!saved) {
         console.log(`检查点已超过 ${range.end}，本轮停止，避免用旧账本覆盖。`);
@@ -235,7 +243,10 @@ async function indexOnce(client) {
       );
     }
     console.log(`chain ${chainId} indexed ${count} logs through block ${last}`);
-    return { indexed: count, lastBlock: Number(last) };
+    if (state.directBpsProblems?.length) {
+      console.error(state.directBpsProblems.join("\n"));
+    }
+    return { indexed: count, lastBlock: Number(last), directBpsProblems: state.directBpsProblems || [] };
   } finally {
     await unlock(client, name);
   }

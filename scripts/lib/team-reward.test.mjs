@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { applyLog, emptyIndexState, restoreDirectBps } from "./reward-index.mjs";
 import {
   UNIT,
   bpsForQual,
@@ -13,6 +14,10 @@ import {
   TIERS,
   TIERS_V2,
   tiersForBlock,
+  directBpsForBlock,
+  directBpsProblem,
+  rewardOptionsForBlock,
+  setRole,
 } from "./team-reward.mjs";
 
 const golden = JSON.parse(readFileSync(new URL("../fixtures/team-golden.json", import.meta.url), "utf8"));
@@ -445,4 +450,171 @@ test("v2 tiers start at 1000, 10000 and 80000", () => {
   }
   assert.equal(teamPaid(TIERS), u(30));
   assert.equal(teamPaid(TIERS_V2), 0n);
+});
+
+function v3(extra = {}) {
+  return { v3: true, ...extra };
+}
+
+test("v3 on 10u pays 0.5 direct, 0.9 then 0.5 differential, and peer on the actual team reward", () => {
+  const s = createState();
+  bind(s, "leader", null);
+  bind(s, "public", "leader");
+  bind(s, "child", "public");
+  setRole(s, "leader", "team_leader");
+  contribute(s, "leader", u(6_000), v3());
+  contribute(s, "public", u(60_000), v3());
+  const tx = contribute(s, "child", u(10), v3());
+  assert.equal(tx.directPaid, u(5) / 10n);
+  assert.equal(tx.deltas.find((row) => row.account === "public" && row.kind === "diff").amount, u(9) / 10n);
+  assert.equal(tx.deltas.find((row) => row.account === "leader" && row.kind === "diff").amount, u(5) / 10n);
+
+  const same = createState();
+  bind(same, "upper", null);
+  bind(same, "lower", "upper");
+  bind(same, "child", "lower");
+  contribute(same, "upper", u(60_000), v3());
+  contribute(same, "lower", u(60_000), v3());
+  const nine = contribute(same, "child", u(10), v3());
+  assert.equal(nine.directPaid, u(5) / 10n);
+  const lowerTeam = nine.deltas.find((row) => row.account === "lower" && row.kind === "diff").amount;
+  const peer = nine.deltas.find((row) => row.account === "upper" && row.kind === "overlay").amount;
+  assert.equal(lowerTeam, u(9) / 10n);
+  assert.equal(peer, u(9) / 100n);
+
+  const tops = createState();
+  bind(tops, "upper", null);
+  bind(tops, "lower", "upper");
+  bind(tops, "child", "lower");
+  setRole(tops, "upper", "team_leader");
+  setRole(tops, "lower", "team_leader");
+  contribute(tops, "upper", u(6_000), v3());
+  contribute(tops, "lower", u(6_000), v3());
+  const fourteen = contribute(tops, "child", u(10), v3());
+  assert.equal(fourteen.deltas.find((row) => row.account === "lower").amount, u(14) / 10n);
+  assert.equal(fourteen.deltas.find((row) => row.account === "upper"), undefined);
+
+  const reached = createState();
+  bind(reached, "upper", null);
+  bind(reached, "lower", "upper");
+  bind(reached, "child", "lower");
+  setRole(reached, "upper", "team_leader");
+  setRole(reached, "lower", "team_leader");
+  contribute(reached, "upper", u(60_000), v3());
+  contribute(reached, "lower", u(60_000), v3());
+  const peerLeader = contribute(reached, "child", u(10), v3());
+  assert.equal(peerLeader.deltas.find((row) => row.account === "lower").amount, u(14) / 10n);
+  assert.equal(peerLeader.deltas.find((row) => row.account === "upper").amount, u(14) / 100n);
+});
+
+test("v3 public 30k tier pays no peer bonus", () => {
+  const s = createState();
+  bind(s, "upper", null);
+  bind(s, "lower", "upper");
+  bind(s, "child", "lower");
+  contribute(s, "upper", u(20_000), v3());
+  contribute(s, "lower", u(30_000), v3());
+  const tx = contribute(s, "child", u(100), v3());
+  assert.equal(tx.deltas.find((row) => row.account === "lower" && row.kind === "diff").amount, u(6));
+  assert.equal(tx.deltas.find((row) => row.account === "upper"), undefined);
+});
+
+test("v3 big leader peer waits for 500k volume", () => {
+  function peer(lowerSelf) {
+    const s = createState();
+    bind(s, "upper", null);
+    bind(s, "lower", "upper");
+    bind(s, "child", "lower");
+    setRole(s, "upper", "big_leader");
+    setRole(s, "lower", "big_leader");
+    contribute(s, "upper", u(1_000), v3());
+    contribute(s, "lower", u(lowerSelf), v3());
+    return contribute(s, "child", u(10), v3()).deltas.find((row) => row.account === "upper" && row.kind === "overlay");
+  }
+  assert.equal(peer(6_000), undefined);
+  assert.equal(peer(500_000).amount, u(14) / 100n);
+});
+
+test("v3 peer uses the compressed team reward and stops at the next same rate", () => {
+  const s = createState();
+  bind(s, "top", null);
+  bind(s, "mid", "top");
+  bind(s, "low", "mid");
+  bind(s, "child", "low");
+  setRole(s, "top", "team_leader");
+  setRole(s, "mid", "team_leader");
+  contribute(s, "top", u(6_000), v3());
+  contribute(s, "mid", u(6_000), v3());
+  contribute(s, "low", u(60_000), v3());
+  const tx = contribute(s, "child", u(10), v3());
+  assert.equal(tx.deltas.find((row) => row.account === "low").amount, u(9) / 10n);
+  assert.equal(tx.deltas.find((row) => row.account === "mid").amount, u(5) / 10n);
+  assert.equal(tx.deltas.find((row) => row.account === "top").amount, u(5) / 100n);
+  assert.equal(tx.deltas.filter((row) => row.account === "top").length, 1);
+});
+
+test("v3 big leader needs 1000 self for 8 percent, a team leader can use umbrella volume", () => {
+  function pay(role, self, team) {
+    const s = createState();
+    bind(s, "up", null);
+    bind(s, "mid", "up");
+    bind(s, "child", "mid");
+    setRole(s, "up", role);
+    contribute(s, "up", u(self), v3());
+    contribute(s, "mid", u(team), v3());
+    contribute(s, "child", u(10), v3());
+    return teamOf(s, "up");
+  }
+  assert.equal(pay("big_leader", 500, 1_500), 0n);
+  assert.equal(pay("team_leader", 500, 1_500), u(8) / 10n);
+  assert.equal(pay("big_leader", 1_000, 0), u(8) / 10n);
+});
+
+test("v3 block keeps earlier deposits on the old direct rate and old tiers", () => {
+  assert.equal(directBpsForBlock(9, "10"), 1_000n);
+  assert.equal(directBpsForBlock(10, "10"), 500n);
+  assert.equal(directBpsForBlock(10, ""), 1_000n);
+  assert.equal(rewardOptionsForBlock(9, { tierV3Block: "10" }).v3, false);
+  assert.equal(rewardOptionsForBlock(10, { tierV3Block: "10" }).v3, true);
+  const s = createState();
+  bind(s, "alice", null);
+  bind(s, "bob", "alice");
+  setRole(s, "alice", "team_leader");
+  contribute(s, "alice", u(6_000), rewardOptionsForBlock(1, { tierV3Block: "10" }));
+  const before = contribute(s, "bob", u(10), rewardOptionsForBlock(1, { tierV3Block: "10" }));
+  assert.equal(before.directPaid, u(1));
+  assert.equal(before.deltas.find((row) => row.account === "alice").amount, u(5) / 10n);
+  assert.equal(rewardOptionsForBlock(10, { tierV3Block: "10" }).directBps, 1_000n);
+  const next = contribute(s, "bob", u(10), rewardOptionsForBlock(10, { tierV3Block: "10" }));
+  assert.equal(next.directPaid, u(1));
+  assert.equal(next.deltas.find((row) => row.account === "alice").amount, u(14) / 10n);
+  const switched = contribute(s, "bob", u(10), { ...rewardOptionsForBlock(11, { tierV3Block: "10" }), directBps: 500n });
+  assert.equal(switched.directPaid, u(5) / 10n);
+});
+
+test("direct bps may move to 500 before the team switch, and must be 500 after it", () => {
+  assert.equal(directBpsProblem(500n, 9, "10"), null);
+  assert.equal(directBpsProblem(1000n, 9, ""), null);
+  assert.match(directBpsProblem(1000n, 10, "10"), /应为 500/);
+  assert.match(directBpsProblem(700n, 10, ""), /只接受/);
+});
+
+test("indexer direct rate follows the bps event and ignores the team switch block", () => {
+  const alice = "0x1111111111111111111111111111111111111111";
+  const bob = "0x2222222222222222222222222222222222222222";
+  const s = emptyIndexState();
+  s.tierV3Block = "100";
+  applyLog(s, { eventName: "Contributed", blockNumber: 1n, args: { account: alice, amount: u(100), selfVolume: 0n, nemoAmount: 0n } });
+  applyLog(s, { eventName: "Registered", blockNumber: 2n, args: { account: bob, code: "0x00", referrer: alice } });
+  applyLog(s, { eventName: "Contributed", blockNumber: 3n, args: { account: bob, amount: u(10), selfVolume: 0n, nemoAmount: 0n } });
+  assert.equal(s.direct.get(alice), u(1));
+  applyLog(s, { eventName: "DirectReferralBpsUpdated", blockNumber: 4n, args: { bps: 500n } });
+  applyLog(s, { eventName: "Contributed", blockNumber: 50n, args: { account: bob, amount: u(10), selfVolume: 0n, nemoAmount: 0n } });
+  assert.equal(s.direct.get(alice), u(15) / 10n);
+  assert.equal(s.directBpsBlock, 4n);
+  assert.equal(s.directBpsProblems.length, 0);
+  const restored = emptyIndexState();
+  restoreDirectBps(restored, { direct_bps: "500", direct_bps_block: "4" });
+  assert.equal(restored.directBps, 500n);
+  assert.equal(restored.directBpsBlock, 4n);
 });

@@ -4,7 +4,6 @@ import { readFileSync } from 'node:fs';
 import { parseEnv } from 'node:util';
 import { createPublicClient, getAddress, http, parseAbi, zeroAddress } from 'viem';
 import { creationReceipt, validateCreation } from './lib/deployment-receipt.mjs';
-
 const args = process.argv.slice(2);
 const value = name => args[args.indexOf(name) + 1];
 if (!args.includes('--env') || !value('--env') || value('--env').startsWith('--')) {
@@ -63,8 +62,10 @@ for (const [key, fn, expected] of [['CKEY','name','Ckey'], ['CKEY','symbol','CKE
 check('CKEY.interestMinter', await read('CKEY','interestMinter'), a.INTEREST);
 for (const key of ['REWARDS','INTEREST']) check(`${key}.vault`, await read(key,'vault'), a.IDO);
 check('INTEREST.nemo', await read('INTEREST','nemo'), a.CKEY);
-const uints = { weekDuration:604800n, rewardsDelay:86400n, nftCap:10000n, directReferralBps:1000n, minIdo:10n**18n, tokensPerUsdt:100n*10n**18n, ambassadorMin:100n*10n**18n, partnerMin:1000n*10n**18n };
+const uints = { weekDuration:604800n, rewardsDelay:86400n, nftCap:10000n, minIdo:10n**18n, tokensPerUsdt:100n*10n**18n, ambassadorMin:100n*10n**18n, partnerMin:1000n*10n**18n };
 for (const [fn, expected] of Object.entries(uints)) check(`IDO.${fn}`, await read('IDO',fn,'uint256'), expected);
+const directBps = await read('IDO', 'directReferralBps', 'uint256');
+check('IDO.directReferralBps.allowed', directBps === 1000n || directBps === 500n, true);
 check('USDT.decimals', await read('USDT','decimals','uint8'), 18);
 check('IDO.weekByBlock', await read('IDO','weekByBlock','bool'), false);
 check('IDO.idoEnded', await read('IDO','idoEnded','bool'), false);

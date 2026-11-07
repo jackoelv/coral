@@ -33,6 +33,7 @@ const child = cleanEnv({
   START_BLOCK: need(env, "START_BLOCK"),
   CHUNK_BLOCKS: process.env.CHUNK_BLOCKS || env.CHUNK_BLOCKS || "2000",
   TEAM_TIER_SWITCH_BLOCK: env.TEAM_TIER_SWITCH_BLOCK || "",
+  TEAM_TIER_V3_BLOCK: env.TEAM_TIER_V3_BLOCK || "",
 });
 const passthrough = process.argv.slice(2).filter((arg, i, all) => arg !== "--db" && all[i - 1] !== "--db");
 const result = spawnSync(process.execPath, [resolve(ROOT, "scripts/index-rewards.mjs"), ...passthrough], { cwd: ROOT, env: child, stdio: "inherit" });
