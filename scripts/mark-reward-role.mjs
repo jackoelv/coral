@@ -7,6 +7,9 @@
  *
  *   node scripts/mark-reward-role.mjs --wallet 0x... --role team_leader
  *   node scripts/mark-reward-role.mjs --wallet 0x... --role big_leader --effective-block 123 --apply
+ *
+ * team_leader uses the 8/11/14 table and is included in publishRoot.
+ * big_leader is an internal mark: 9% of a downline deposit, paid manually, never published.
  *   node scripts/mark-reward-role.mjs --wallet 0x... --clear --apply
  *   npm run role:mark -- --wallet 0x... --role team_leader --db preview --apply
  */

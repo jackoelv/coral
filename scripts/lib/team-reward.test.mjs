@@ -18,6 +18,9 @@ import {
   directBpsProblem,
   rewardOptionsForBlock,
   setRole,
+  setVolumeParent,
+  noteImportedSelf,
+  manualOf,
 } from "./team-reward.mjs";
 
 const golden = JSON.parse(readFileSync(new URL("../fixtures/team-golden.json", import.meta.url), "utf8"));
@@ -519,20 +522,42 @@ test("v3 public 30k tier pays no peer bonus", () => {
   assert.equal(tx.deltas.find((row) => row.account === "upper"), undefined);
 });
 
-test("v3 big leader peer waits for 500k volume", () => {
-  function peer(lowerSelf) {
-    const s = createState();
-    bind(s, "upper", null);
-    bind(s, "lower", "upper");
-    bind(s, "child", "lower");
-    setRole(s, "upper", "big_leader");
-    setRole(s, "lower", "big_leader");
-    contribute(s, "upper", u(1_000), v3());
-    contribute(s, "lower", u(lowerSelf), v3());
-    return contribute(s, "child", u(10), v3()).deltas.find((row) => row.account === "upper" && row.kind === "overlay");
-  }
-  assert.equal(peer(6_000), undefined);
-  assert.equal(peer(500_000).amount, u(14) / 100n);
+test("v3 internal 9 percent is off the published book and only the nearest mark is paid", () => {
+  const s = createState();
+  bind(s, "upper", null);
+  bind(s, "lower", "upper");
+  bind(s, "leader", "lower");
+  bind(s, "child", "leader");
+  setRole(s, "upper", "big_leader");
+  setRole(s, "lower", "big_leader");
+  setRole(s, "leader", "team_leader");
+  seedSelf(s, "leader", u(6_000));
+  const tx = contribute(s, "child", u(10), v3());
+  assert.equal(tx.directPaid, u(5) / 10n);
+  assert.equal(tx.deltas.find((row) => row.account === "leader").amount, u(14) / 10n);
+  assert.equal(tx.manual.account, "lower");
+  assert.equal(tx.manual.amount, u(9) / 10n);
+  assert.equal(teamOf(s, "lower"), 0n);
+  assert.equal(teamOf(s, "upper"), 0n);
+  assert.equal(manualOf(s, "lower"), u(9) / 10n);
+  assert.equal(manualOf(s, "upper"), 0n);
+});
+
+test("v3 internal 9 percent waits for the role and does not apply before the new tiers", () => {
+  const s = createState();
+  bind(s, "up", null);
+  bind(s, "child", "up");
+  setRole(s, "up", "big_leader", 20n);
+  contribute(s, "up", u(1_000), v3());
+  contribute(s, "child", u(10), { v3: false });
+  assert.equal(manualOf(s, "up"), 0n);
+  assert.equal(teamOf(s, "up"), u(3) / 10n);
+  contribute(s, "child", u(10), v3({ blockNumber: 10n }));
+  assert.equal(manualOf(s, "up"), 0n);
+  assert.equal(teamOf(s, "up"), u(3) / 10n);
+  contribute(s, "child", u(10), v3({ blockNumber: 20n }));
+  assert.equal(manualOf(s, "up"), u(9) / 10n);
+  assert.equal(teamOf(s, "up"), u(3) / 10n);
 });
 
 test("v3 peer uses the compressed team reward and stops at the next same rate", () => {
@@ -553,8 +578,8 @@ test("v3 peer uses the compressed team reward and stops at the next same rate", 
   assert.equal(tx.deltas.filter((row) => row.account === "top").length, 1);
 });
 
-test("v3 big leader needs 1000 self for 8 percent, a team leader can use umbrella volume", () => {
-  function pay(role, self, team) {
+test("v3 team leader can use umbrella volume, an internal mark does not take that rate", () => {
+  function book(role, self, team) {
     const s = createState();
     bind(s, "up", null);
     bind(s, "mid", "up");
@@ -563,11 +588,14 @@ test("v3 big leader needs 1000 self for 8 percent, a team leader can use umbrell
     contribute(s, "up", u(self), v3());
     contribute(s, "mid", u(team), v3());
     contribute(s, "child", u(10), v3());
-    return teamOf(s, "up");
+    return { team: teamOf(s, "up"), manual: manualOf(s, "up") };
   }
-  assert.equal(pay("big_leader", 500, 1_500), 0n);
-  assert.equal(pay("team_leader", 500, 1_500), u(8) / 10n);
-  assert.equal(pay("big_leader", 1_000, 0), u(8) / 10n);
+  const leader = book("team_leader", 500, 1_500);
+  assert.equal(leader.team, u(8) / 10n);
+  assert.equal(leader.manual, 0n);
+  const internal = book("big_leader", 1_000, 0);
+  assert.equal(internal.team, 0n);
+  assert.equal(internal.manual, u(9) / 10n);
 });
 
 test("v3 block keeps earlier deposits on the old direct rate and old tiers", () => {
@@ -617,4 +645,51 @@ test("indexer direct rate follows the bps event and ignores the team switch bloc
   restoreDirectBps(restored, { direct_bps: "500", direct_bps_block: "4" });
   assert.equal(restored.directBps, 500n);
   assert.equal(restored.directBpsBlock, 4n);
+});
+
+test("a volume parent takes the umbrella and leaves the direct on the chain referrer", () => {
+  const s = createState();
+  bind(s, "admin", null);
+  bind(s, "qiang", "admin");
+  bind(s, "jack", "qiang");
+  bind(s, "tian", "jack");
+  seedSelf(s, "qiang", u(100));
+  seedSelf(s, "tian", u(100));
+  setVolumeParent(s, "jack", "admin");
+  noteImportedSelf(s, "jack", u(501));
+  assert.equal(s.team.get("admin"), u(501));
+  assert.equal(s.team.get("qiang") ?? 0n, 0n);
+
+  const fromTian = contribute(s, "tian", u(100), v3());
+  assert.equal(fromTian.directTo, "jack");
+  assert.equal(fromTian.directPaid, u(5));
+  assert.equal(s.team.get("jack"), u(100));
+  assert.equal(s.team.get("qiang") ?? 0n, 0n);
+  assert.equal(s.team.get("admin"), u(601));
+  assert.equal(fromTian.deltas.find((row) => row.account === "qiang"), undefined);
+
+  const fromJack = contribute(s, "jack", u(100), v3());
+  assert.equal(fromJack.directTo, "qiang");
+  assert.equal(fromJack.directPaid, u(5));
+  assert.equal(s.team.get("qiang") ?? 0n, 0n);
+  assert.equal(s.team.get("admin"), u(701));
+  assert.equal(s.referrer.get("jack"), "qiang");
+});
+
+test("manual 9 percent follows the volume parent and skips the chain referrer", () => {
+  const s = createState();
+  bind(s, "admin", null);
+  bind(s, "qiang", "admin");
+  bind(s, "jack", "qiang");
+  setRole(s, "qiang", "big_leader");
+  setRole(s, "admin", "big_leader");
+  seedSelf(s, "qiang", u(100));
+  seedSelf(s, "jack", u(100));
+  setVolumeParent(s, "jack", "admin");
+  const tx = contribute(s, "jack", u(100), v3());
+  assert.equal(tx.directTo, "qiang");
+  assert.equal(tx.directPaid, u(5));
+  assert.equal(tx.manual.account, "admin");
+  assert.equal(manualOf(s, "qiang"), 0n);
+  assert.equal(s.team.get("qiang") ?? 0n, 0n);
 });

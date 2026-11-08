@@ -1,6 +1,6 @@
 import { getAddress } from "viem";
 import { emptyIndexState } from "./reward-index.mjs";
-import { bind } from "./team-reward.mjs";
+import { bind, setVolumeParent } from "./team-reward.mjs";
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS coral_indexer_state (
@@ -64,6 +64,16 @@ CREATE TABLE IF NOT EXISTS coral_reward_role (
   effective_block bigint NOT NULL,
   note text NOT NULL DEFAULT '',
   updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (chain_id, ido_address, wallet)
+);
+CREATE TABLE IF NOT EXISTS coral_volume_root (
+  chain_id bigint NOT NULL,
+  ido_address text NOT NULL,
+  wallet text NOT NULL,
+  volume_parent text NOT NULL,
+  note text NOT NULL DEFAULT '',
+  adjusted_wei text,
+  adjusted_at timestamptz,
   PRIMARY KEY (chain_id, ido_address, wallet)
 );
 `;
@@ -172,6 +182,21 @@ export function applyRoles(state, rows) {
       effectiveUnix: null,
       note: row.note || "",
     });
+  }
+}
+
+export async function loadVolumeRoots(client, chainId, idoAddress) {
+  const { rows } = await client.query(
+    `SELECT wallet, volume_parent, note, adjusted_wei
+     FROM coral_volume_root WHERE chain_id = $1 AND ido_address = $2`,
+    [chainId, idoAddress],
+  );
+  return rows;
+}
+
+export function applyVolumeParents(state, rows) {
+  for (const row of rows) {
+    setVolumeParent(state, getAddress(row.wallet), row.volume_parent ? getAddress(row.volume_parent) : null);
   }
 }
 

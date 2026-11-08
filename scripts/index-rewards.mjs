@@ -17,7 +17,9 @@ import {
   loadAccounts,
   loadCheckpoint,
   loadRoles,
+  loadVolumeRoots,
   applyRoles,
+  applyVolumeParents,
   lockName,
   saveIndex,
   stateFromRows,
@@ -200,6 +202,7 @@ async function indexOnce(client) {
     state.tierSwitchBlock = process.env.TEAM_TIER_SWITCH_BLOCK || "";
     state.tierV3Block = process.env.TEAM_TIER_V3_BLOCK || "";
     applyRoles(state, await loadRoles(client, chainId, ido));
+    applyVolumeParents(state, await loadVolumeRoots(client, chainId, ido));
     const origin = planChunk({ lastBlock: last, startBlock, safeHead, chunkBlocks }).from;
     const startedAt = Date.now();
     console.log(

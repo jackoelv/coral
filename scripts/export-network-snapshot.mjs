@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 /**
  * Read-only Coral snapshot from the production index.
- * Checks each indexed wallet against the vault and rewards contract, then writes
- * JSON and an HTML invite tree into ckey-snapshots/. Does not scan historical logs
- * and does not write the database.
+ * The default reads the database only and writes JSON plus an HTML invite tree
+ * into ckey-snapshots/. It does not scan logs and does not write the database.
  *
- *   node scripts/export-network-snapshot.mjs
+ *   npm run network:snapshot
+ *   npm run network:check
+ *
+ * --check reads contract totals once and compares them with the index sums.
+ * It does not read each address.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -15,11 +18,12 @@ import { rpcErrorText } from "./lib/reward-index.mjs";
 import { directBpsProblem } from "./lib/team-reward.mjs";
 import {
   accountsFromIndex,
+  annotatePhase1Manual,
   annotateRewardRoles,
-  bigLeaderCandidates,
   buildDailySeries,
   buildTree,
-  compareBooksToChain,
+  layoutVolumeParents,
+  compareIndexTotals,
   fileStamp,
   flowsFromBooks,
   formatShanghai,
@@ -32,6 +36,7 @@ import {
 } from "./lib/network-snapshot.mjs";
 
 const DIR = resolve(ROOT, "ckey-snapshots");
+const CHECK = process.argv.includes("--check");
 const UNIT = 10n ** 18n;
 const VIEWS = parseAbi([
   "function totalContributed() view returns (uint256)",
@@ -39,7 +44,6 @@ const VIEWS = parseAbi([
   "function totalDirectAccrued() view returns (uint256)",
   "function totalClaimed() view returns (uint256)",
   "function directReferralBps() view returns (uint256)",
-  "function getAccount(address) view returns ((address referrer, bytes32 inviteCode, uint256 selfVolume, uint256 directRewards, uint256 claimed, bool registered))",
 ]);
 const REWARD_VIEWS = parseAbi([
   "function claimed(address) view returns (uint256)",
@@ -50,35 +54,6 @@ const REWARD_VIEWS = parseAbi([
 ]);
 const ERC20 = parseAbi(["function balanceOf(address) view returns (uint256)"]);
 
-function normalizeAccount(raw) {
-  if (Array.isArray(raw)) {
-    const [referrer, , selfVolume, directRewards, claimed, registered] = raw;
-    return { referrer, selfVolume, directRewards, claimed, registered };
-  }
-  return {
-    referrer: raw.referrer,
-    selfVolume: raw.selfVolume,
-    directRewards: raw.directRewards,
-    claimed: raw.claimed,
-    registered: raw.registered,
-  };
-}
-
-async function pool(items, size, fn) {
-  const out = new Array(items.length);
-  let cursor = 0;
-  async function worker() {
-    for (;;) {
-      const index = cursor;
-      cursor += 1;
-      if (index >= items.length) return;
-      out[index] = await fn(items[index]);
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(size, items.length) }, () => worker()));
-  return out;
-}
-
 async function readOrFail(client, call, blockNumber) {
   try {
     return await client.readContract({ ...call, blockNumber });
@@ -87,31 +62,12 @@ async function readOrFail(client, call, blockNumber) {
   }
 }
 
-async function readChainAccounts(client, ido, rewards, wallets, blockNumber) {
-  const out = new Map();
-  let done = 0;
-  await pool(wallets, 8, async (wallet) => {
-    const [account, claimed] = await Promise.all([
-      client.readContract({ address: ido, abi: VIEWS, functionName: "getAccount", args: [wallet], blockNumber }).then(
-        (result) => ({ ok: true, result }),
-        (error) => ({ ok: false, error }),
-      ),
-      client.readContract({ address: rewards, abi: REWARD_VIEWS, functionName: "claimed", args: [wallet], blockNumber }).then(
-        (result) => ({ ok: true, result }),
-        (error) => ({ ok: false, error }),
-      ),
-    ]);
-    out.set(wallet, {
-      accountOk: account.ok,
-      account: account.ok ? normalizeAccount(account.result) : null,
-      accountError: account.ok ? "" : rpcErrorText(account.error).slice(0, 180),
-      claimedOk: claimed.ok,
-      teamClaimed: claimed.ok ? claimed.result : null,
-    });
-    done += 1;
-    if (done % 20 === 0 || done === wallets.length) console.log(`读账户 ${done}/${wallets.length}`);
-  });
-  return out;
+async function blockUnix(client, block, head) {
+  if (block == null || block === "" || block === "0") return null;
+  const height = BigInt(block);
+  if (height <= 0n || height > head) return null;
+  const fetched = await client.getBlock({ blockNumber: height });
+  return Number(fetched.timestamp);
 }
 
 function weiFromUsdt(amount) {
@@ -146,6 +102,7 @@ try {
   let indexerLastBlock = null;
   let directBpsBlock = null;
   let roleRows = [];
+  let volumeRoots = [];
   try {
     await database.query("BEGIN READ ONLY");
     const bpsColumn = await database.query(
@@ -184,6 +141,14 @@ try {
       );
       payoutRows = payouts.rows;
     }
+    const volumeTable = await database.query(`SELECT to_regclass('public.coral_volume_root') AS name`);
+    if (volumeTable.rows[0].name) {
+      const volumes = await database.query(
+        `SELECT wallet, volume_parent, note FROM coral_volume_root WHERE chain_id = $1 AND lower(ido_address) = lower($2)`,
+        [56, a.IDO],
+      );
+      volumeRoots = volumes.rows;
+    }
     const roleTable = await database.query(`SELECT to_regclass('public.coral_reward_role') AS name`);
     if (roleTable.rows[0].name) {
       const roles = await database.query(
@@ -200,38 +165,43 @@ try {
     await database.end();
   }
   console.log(`正式库账户 ${stored.length} 个，有备注 ${notes.size} 个，链上订单 ${orderRows.length} 笔，拨付记录 ${payoutRows.length} 笔。索引检查点 ${indexerLastBlock ?? "无"}。`);
+  console.log(CHECK ? "这次读链上合计，不按地址读。" : "这次只读数据库，不读链。");
 
-  const client = await mainnetClient(env);
-  const head = await client.getBlockNumber();
-  console.log(`链头 ${head}。按地址核对金库账户和奖励合约，不扫历史日志。`);
+  const v3Block = (env.TEAM_TIER_V3_BLOCK || "").trim();
+  let head = null;
   let switchUnix = null;
   let v3Unix = null;
   let directSwitchUnix = null;
-  const switchBlock = (env.TEAM_TIER_SWITCH_BLOCK || "").trim();
-  const v3Block = (env.TEAM_TIER_V3_BLOCK || "").trim();
-  if (switchBlock && switchBlock !== "0") {
-    const block = await client.getBlock({ blockNumber: BigInt(switchBlock) });
-    switchUnix = Number(block.timestamp);
+  let chainTotals = null;
+  let usdtBalance = null;
+  let committed = null;
+  let rewardCap = null;
+  let historicalBudget = null;
+  if (CHECK) {
+    const client = await mainnetClient(env);
+    head = await client.getBlockNumber();
+    const switchBlock = (env.TEAM_TIER_SWITCH_BLOCK || "").trim();
+    switchUnix = await blockUnix(client, switchBlock, head);
+    directSwitchUnix = await blockUnix(client, directBpsBlock, head);
+    v3Unix = await blockUnix(client, v3Block, head);
+    for (const role of roleRows) {
+      const height = BigInt(role.effective_block ?? 0);
+      role.effectiveUnix = height > head ? Number.MAX_SAFE_INTEGER : await blockUnix(client, role.effective_block, head);
+    }
+    chainTotals = {
+      totalContributed: await readOrFail(client, { address: a.IDO, abi: VIEWS, functionName: "totalContributed" }, head),
+      totalImported: await readOrFail(client, { address: a.IDO, abi: VIEWS, functionName: "totalImported" }, head),
+      totalDirectAccrued: await readOrFail(client, { address: a.IDO, abi: VIEWS, functionName: "totalDirectAccrued" }, head),
+      totalClaimed: await readOrFail(client, { address: a.IDO, abi: VIEWS, functionName: "totalClaimed" }, head),
+      totalTeamPaid: await readOrFail(client, { address: a.REWARDS, abi: REWARD_VIEWS, functionName: "totalTeamPaid" }, head),
+    };
+    usdtBalance = await readOrFail(client, { address: USDT, abi: ERC20, functionName: "balanceOf", args: [a.IDO] }, head);
+    committed = await readOrFail(client, { address: a.REWARDS, abi: REWARD_VIEWS, functionName: "committed" }, head);
+    rewardCap = await readOrFail(client, { address: a.REWARDS, abi: REWARD_VIEWS, functionName: "rewardCap" }, head);
+    historicalBudget = await readOrFail(client, { address: a.REWARDS, abi: REWARD_VIEWS, functionName: "historicalTeamBudget" }, head);
+    const directBps = await readOrFail(client, { address: a.IDO, abi: VIEWS, functionName: "directReferralBps" }, head);
+    chainTotals.directBpsProblem = directBpsProblem(directBps, head, v3Block);
   }
-  if (directBpsBlock != null && BigInt(directBpsBlock) <= head) {
-    const block = await client.getBlock({ blockNumber: BigInt(directBpsBlock) });
-    directSwitchUnix = Number(block.timestamp);
-  }
-  if (v3Block && v3Block !== "0" && BigInt(v3Block) <= head) {
-    const block = await client.getBlock({ blockNumber: BigInt(v3Block) });
-    v3Unix = Number(block.timestamp);
-  }
-  const chainTotals = {
-    totalContributed: await readOrFail(client, { address: a.IDO, abi: VIEWS, functionName: "totalContributed" }, head),
-    totalImported: await readOrFail(client, { address: a.IDO, abi: VIEWS, functionName: "totalImported" }, head),
-    totalDirectAccrued: await readOrFail(client, { address: a.IDO, abi: VIEWS, functionName: "totalDirectAccrued" }, head),
-    totalClaimed: await readOrFail(client, { address: a.IDO, abi: VIEWS, functionName: "totalClaimed" }, head),
-    totalTeamPaid: await readOrFail(client, { address: a.REWARDS, abi: REWARD_VIEWS, functionName: "totalTeamPaid" }, head),
-  };
-  const usdtBalance = await readOrFail(client, { address: USDT, abi: ERC20, functionName: "balanceOf", args: [a.IDO] }, head);
-  const committed = await readOrFail(client, { address: a.REWARDS, abi: REWARD_VIEWS, functionName: "committed" }, head);
-  const rewardCap = await readOrFail(client, { address: a.REWARDS, abi: REWARD_VIEWS, functionName: "rewardCap" }, head);
-  const historicalBudget = await readOrFail(client, { address: a.REWARDS, abi: REWARD_VIEWS, functionName: "historicalTeamBudget" }, head);
 
   const orders = orderRows.map((row) => {
     const unix = unixOf(row.at);
@@ -262,84 +232,79 @@ try {
     claimedWei: BigInt(row.claimed_wei),
   }));
   const built = accountsFromIndex({ rows, orders, notes });
-  annotateRewardRoles(built.accounts, roleRows, { head, v3Block });
-  const roleTimes = new Map();
-  for (const role of roleRows) {
-    const block = BigInt(role.effective_block);
-    if (block > head) {
-      role.effectiveUnix = "9007199254740991";
-      continue;
-    }
-    if (!roleTimes.has(String(role.effective_block))) {
-      const fetched = await client.getBlock({ blockNumber: block });
-      roleTimes.set(String(role.effective_block), Number(fetched.timestamp));
-    }
-    role.effectiveUnix = roleTimes.get(String(role.effective_block));
-  }
-  const wallets = built.accounts.map((account) => account.wallet);
-  const chainByWallet = await readChainAccounts(client, a.IDO, a.REWARDS, wallets, head);
+  annotatePhase1Manual(built.accounts);
+  const laid = layoutVolumeParents(built.accounts, volumeRoots);
+  const checkpoint = indexerLastBlock == null ? 0n : BigInt(indexerLastBlock);
+  annotateRewardRoles(built.accounts, roleRows, { head: head ?? checkpoint, v3Block });
   const orderWei = orders.reduce((sum, order) => sum + order.amountWei, 0n);
   const payoutDirectWei = payouts.filter((row) => row.kind === "direct").reduce((sum, row) => sum + row.amountWei, 0n);
   const payoutTeamWei = payouts.filter((row) => row.kind === "team").reduce((sum, row) => sum + row.amountWei, 0n);
-  const checked = compareBooksToChain({
-    accounts: built.accounts,
-    chainByWallet,
-    chainTotals,
-    orderWei,
-    payoutDirectWei,
-    payoutTeamWei,
+  const books = flowsFromBooks({
+    rows,
+    orders,
+    payouts,
+    switchUnix,
+    v3Unix,
+    directSwitchUnix,
+    roles: CHECK ? roleRows : [],
   });
-  const replayProblems = [];
-  const books = flowsFromBooks({ rows, orders, payouts, switchUnix, v3Unix, directSwitchUnix, roles: roleRows });
-  const replayByWallet = new Map(books.rows.map((row) => [getAddress(row.wallet), row]));
+  let manualWei = 0n;
   for (const account of built.accounts) {
-    const replay = replayByWallet.get(account.wallet);
-    if (!replay) continue;
-    if (replay.teamWei !== account.teamWei) replayProblems.push(`${account.wallet.slice(0, 6)}…${account.wallet.slice(-4)} 按订单重放的伞下 ${formatUsdt(replay.teamWei)} USDT，索引 ${formatUsdt(account.teamWei)} USDT`);
-    if (replay.teamRewardWei !== account.teamRewardWei) replayProblems.push(`${account.wallet.slice(0, 6)}…${account.wallet.slice(-4)} 按订单重放的网体奖 ${formatUsdt(replay.teamRewardWei)} USDT，索引 ${formatUsdt(account.teamRewardWei)} USDT`);
-    if (replay.directWei !== account.directWei) replayProblems.push(`${account.wallet.slice(0, 6)}…${account.wallet.slice(-4)} 按订单重放的直推 ${formatUsdt(replay.directWei)} USDT，索引 ${formatUsdt(account.directWei)} USDT`);
+    const manual = books.manualRewards?.get(account.wallet) ?? 0n;
+    account.manualRewardWei = manual;
+    manualWei += manual;
   }
-  const problems = [...built.problems, ...checked.accountProblems];
-  const directBps = await readOrFail(client, { address: a.IDO, abi: VIEWS, functionName: "directReferralBps" }, head);
-  const bpsProblem = directBpsProblem(directBps, head, v3Block);
-  if (bpsProblem) problems.push(bpsProblem);
-  const candidates = bigLeaderCandidates(built.accounts);
-  const warnings = [...checked.ledgerProblems, ...replayProblems];
   const tree = buildTree(built.accounts);
-  problems.push(...tree.problems);
-
   const historicalWei = built.accounts.reduce((sum, account) => sum + account.historicalTeamRewardWei, 0n);
   const directWei = built.accounts.reduce((sum, account) => sum + account.directWei, 0n);
   const teamRewardWei = built.accounts.reduce((sum, account) => sum + account.teamRewardWei, 0n);
+  const teamClaimedWei = built.accounts.reduce((sum, account) => sum + account.teamClaimedWei, 0n);
+  const selfWei = built.accounts.reduce((sum, account) => sum + account.selfWei, 0n);
   const importedWei = built.accounts.reduce((sum, account) => sum + account.importedWei, 0n);
+  const compared = CHECK
+    ? compareIndexTotals({ selfWei, directWei, teamClaimedWei, orderWei, payoutDirectWei, payoutTeamWei, chainTotals })
+    : { problems: [], warnings: [] };
+  const problems = [...built.problems, ...laid.problems, ...tree.problems, ...compared.problems];
+  if (chainTotals?.directBpsProblem) problems.push(chainTotals.directBpsProblem);
+  const warnings = compared.warnings;
   const days = buildDailySeries(books.flows, { historicalTeamWei: historicalWei });
   const weeks = rollupWeeks(days);
   const headroom = marketHeadroom({
-    contributedWei: chainTotals.totalContributed,
-    importedWei: chainTotals.totalImported,
+    contributedWei: CHECK ? chainTotals.totalContributed : selfWei - importedWei,
+    importedWei: CHECK ? chainTotals.totalImported : importedWei,
     directWei,
     teamWei: teamRewardWei + historicalWei,
   });
-  const paid = chainTotals.totalClaimed + chainTotals.totalTeamPaid;
-  const afterPayouts = chainTotals.totalContributed - paid;
-  const gap = usdtBalance - afterPayouts;
   const review = [
-    `累计收款 ${formatUsdt(chainTotals.totalContributed)} USDT，导入业绩 ${formatUsdt(chainTotals.totalImported)} USDT。`,
-    `直推已领取 ${formatUsdt(chainTotals.totalClaimed)} USDT，网体已领取 ${formatUsdt(chainTotals.totalTeamPaid)} USDT。收款减去这两项是 ${formatUsdt(afterPayouts)} USDT。链上金库 USDT 余额 ${formatUsdt(usdtBalance)} USDT。`,
-    gap === 0n
-      ? "链上余额和收款减去已领取一致。"
-      : `余额和这项差 ${formatUsdt(gap)} USDT。差出来的是另行转入的备付，或从金库提走、没有记成领取的钱。`,
-    `直推计提 ${formatUsdt(directWei)} USDT。网体计提 ${formatUsdt(teamRewardWei + historicalWei)} USDT，其中历史网体奖 ${formatUsdt(historicalWei)} USDT。`,
+    `索引本人业绩合计 ${formatUsdt(selfWei)} USDT。订单入金 ${formatUsdt(orderWei)} USDT，导入 ${formatUsdt(importedWei)} USDT。`,
+    `索引直推计提 ${formatUsdt(directWei)} USDT。网体计提 ${formatUsdt(teamRewardWei + historicalWei)} USDT，其中历史网体奖 ${formatUsdt(historicalWei)} USDT。网体已领 ${formatUsdt(teamClaimedWei)} USDT。`,
+    `拨付表记录直推领取 ${formatUsdt(payoutDirectWei)} USDT，网体领取 ${formatUsdt(payoutTeamWei)} USDT。`,
+    `链下另计 ${formatUsdt(manualWei)} USDT。这是内部标记的 9%，不进发布 root，按地址人工拨付。`,
     `市场拨比 ${ratioText(headroom.ratioBps)}。25% 帽是 ${formatUsdt(headroom.cap)} USDT，${headroom.room >= 0n ? `还剩 ${formatUsdt(headroom.room)} USDT` : `已超过 ${formatUsdt(-headroom.room)} USDT`}。`,
-    `奖励合约当前帽 ${formatUsdt(rewardCap)} USDT，已发布承诺 ${formatUsdt(committed)} USDT，历史网体预算 ${formatUsdt(historicalBudget)} USDT。`,
   ];
+  if (CHECK) {
+    const paid = chainTotals.totalClaimed + chainTotals.totalTeamPaid;
+    const afterPayouts = chainTotals.totalContributed - paid;
+    const gap = usdtBalance - afterPayouts;
+    const unpublished = teamRewardWei + historicalWei - committed;
+    review.push(
+      `链上收款 ${formatUsdt(chainTotals.totalContributed)} USDT，导入 ${formatUsdt(chainTotals.totalImported)} USDT。直推已领 ${formatUsdt(chainTotals.totalClaimed)} USDT，网体已领 ${formatUsdt(chainTotals.totalTeamPaid)} USDT。`,
+      `收款减去已领是 ${formatUsdt(afterPayouts)} USDT。金库 USDT 余额 ${formatUsdt(usdtBalance)} USDT。${gap === 0n ? "两项一致。" : `差额 ${formatUsdt(gap)} USDT，是另行转入的备付，或提走后没有记成领取的钱。`}`,
+      `奖励合约当前帽 ${formatUsdt(rewardCap)} USDT，已发布承诺 ${formatUsdt(committed)} USDT，索引网体计提比已发布多 ${formatUsdt(unpublished)} USDT。历史网体预算 ${formatUsdt(historicalBudget)} USDT。`,
+    );
+  }
+  const volumeMode = volumeRoots.length > 0;
   const notesForPage = [
-    "入金时间来自正式库的链上订单，领取时间来自拨付表。没有重扫历史日志。",
-    "每个地址的上级、本人业绩、直推计提和网体已领已和合约核对。网体业绩和网体计提是索引算出来的，合约不按地址保存这两项。",
+    volumeMode
+      ? "入金时间来自正式库的链上订单，领取时间来自拨付表。业绩按计算上级重算。直推、网体和合计仍是索引里已经记下的数字。"
+      : "入金时间来自正式库的链上订单，领取时间来自拨付表。节点上的业绩和收益来自索引。",
+    "标了「一期手动」的直推和拨付是第一期线下转的，不在索引里，也不进合计和发布 root。",
+    "网体业绩和网体计提合约不按地址保存。增长图按订单重放，仍沿链上推荐人，不带 --check 时不知道档位切换的链上时间。",
+    ...laid.notes,
     ...warnings,
   ];
-  if (indexerLastBlock != null) notesForPage.push(`索引检查点在区块 ${indexerLastBlock}，这次读取的链头是 ${head}。`);
-  if (candidates.length) notesForPage.push(`大团队长候选，尚未标记：${candidates.join("，")}。本人满 1 万，或本人满 1000 且至少 3 个直推下级各自满 1000。这不是标记。`);
+  if (!CHECK) notesForPage.push("这次没有读链。要对合计，再跑 npm run network:check。");
+  if (indexerLastBlock != null) notesForPage.push(CHECK ? `索引检查点在区块 ${indexerLastBlock}，链头是 ${head}。` : `索引检查点在区块 ${indexerLastBlock}。`);
   const generatedAt = new Date().toISOString();
   const snapshot = {
     ok: problems.length === 0,
@@ -348,25 +313,28 @@ try {
     chainId: 56,
     ido: a.IDO,
     rewards: a.REWARDS,
-    head: head.toString(),
+    checked: CHECK,
+    head: head == null ? null : head.toString(),
     indexerLastBlock: indexerLastBlock == null ? null : String(indexerLastBlock),
     notes: notesForPage,
     problems,
     warnings,
     totals: {
-      contributedWei: chainTotals.totalContributed.toString(),
-      importedWei: chainTotals.totalImported.toString(),
+      contributedWei: (CHECK ? chainTotals.totalContributed : orderWei).toString(),
+      importedWei: (CHECK ? chainTotals.totalImported : importedWei).toString(),
       directWei: directWei.toString(),
       teamRewardWei: teamRewardWei.toString(),
+      manualRewardWei: manualWei.toString(),
       historicalTeamRewardWei: historicalWei.toString(),
-      directClaimedWei: chainTotals.totalClaimed.toString(),
-      teamClaimedWei: chainTotals.totalTeamPaid.toString(),
-      usdtBalanceWei: usdtBalance.toString(),
-      rewardCapWei: rewardCap.toString(),
-      committedWei: committed.toString(),
-      historicalBudgetWei: historicalBudget.toString(),
+      directClaimedWei: (CHECK ? chainTotals.totalClaimed : payoutDirectWei).toString(),
+      teamClaimedWei: teamClaimedWei.toString(),
+      usdtBalanceWei: usdtBalance == null ? null : usdtBalance.toString(),
+      rewardCapWei: rewardCap == null ? null : rewardCap.toString(),
+      committedWei: committed == null ? null : committed.toString(),
+      historicalBudgetWei: historicalBudget == null ? null : historicalBudget.toString(),
       ratioBps: headroom.ratioBps.toString(),
       indexedImportedWei: importedWei.toString(),
+      selfWei: selfWei.toString(),
     },
     accounts: built.accounts,
   };
@@ -380,7 +348,9 @@ try {
     database: db.name,
     ido: a.IDO,
     rewards: a.REWARDS,
-    safeHead: head.toString(),
+    safeHead: head == null ? "" : head.toString(),
+    checked: CHECK,
+    scope: CHECK ? `截止区块 ${head}` : `索引检查点 ${indexerLastBlock ?? "无"}`,
     problems,
     notes: notesForPage,
     roots: tree.roots,
@@ -388,6 +358,7 @@ try {
     weeks,
     review,
     snapshotName,
+    volumeMode,
   }));
   if (problems.length || warnings.length) {
     const reportPath = resolve(DIR, reportName);
@@ -396,10 +367,12 @@ try {
       ...warnings.map((line) => `订单或拨付表 ${line}`),
     ];
     writeFileSync(reportPath, `${lines.join("\n")}\n`);
-    console.log(problems.length ? `合约核对有 ${problems.length} 条差异。` : "每个地址的合约字段和索引一致。");
-    if (warnings.length) console.log(`订单或拨付表还有 ${warnings.length} 条和合约合计不一致，写在 ${reportPath}`);
+    console.log(problems.length ? `有 ${problems.length} 条差异。` : "索引合计和链上合计一致。");
+    if (warnings.length) console.log(`订单或拨付表还有 ${warnings.length} 条和链上合计不一致，写在 ${reportPath}`);
+  } else if (CHECK) {
+    console.log("链上合计和索引一致。");
   } else {
-    console.log("核对通过。");
+    console.log("已按数据库写出，没有读链。");
   }
   console.log(snapshotPath);
   console.log(pagePath);

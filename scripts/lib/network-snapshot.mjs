@@ -261,6 +261,75 @@ function sortTree(node) {
 }
 
 /**
+ * Hang wallets on their volume parent and recompute umbrella volume from that tree.
+ * Direct, team rewards and the indexed total stay as stored. A chain referrer that
+ * differs from the volume parent is a note, not a reconciliation error.
+ */
+export function layoutVolumeParents(accounts, volumeRoots = []) {
+  const overrides = new Map();
+  for (const row of volumeRoots) {
+    overrides.set(getAddress(row.wallet), {
+      parent: getAddress(row.volumeParent || row.volume_parent),
+      note: row.note || "",
+    });
+  }
+  if (overrides.size === 0) return { problems: [], notes: [] };
+  const byWallet = new Map(accounts.map((account) => [account.wallet, account]));
+  const notes = [];
+  for (const account of accounts) {
+    if (account.chainReferrer === undefined) account.chainReferrer = account.referrer;
+    const override = overrides.get(account.wallet);
+    if (!override) continue;
+    account.volumeParent = override.parent;
+    account.referrer = override.parent;
+    const chain = byWallet.get(account.chainReferrer);
+    const chainLabel = chain?.note || (account.chainReferrer ? account.chainReferrer.slice(-4) : "无");
+    account.chainReferrerLabel = `链上推荐人仍是${chainLabel}`;
+    const parent = byWallet.get(override.parent);
+    const who = account.note || account.wallet.slice(-4);
+    notes.push(`${who} 的计算上级是 ${parent?.note || override.parent.slice(-4)}，链上推荐人仍是${chainLabel}。`);
+  }
+  return { problems: recomputeUmbrella(accounts), notes };
+}
+
+function recomputeUmbrella(accounts) {
+  const byWallet = new Map(accounts.map((account) => [account.wallet, account]));
+  const children = new Map();
+  for (const account of accounts) {
+    account.indexedTeamWei = account.teamWei;
+    account.indexedNetworkWei = account.selfWei + account.teamWei;
+    if (!account.referrer) continue;
+    const list = children.get(account.referrer) || [];
+    list.push(account.wallet);
+    children.set(account.referrer, list);
+  }
+  const teamOf = new Map();
+  function team(wallet, seen) {
+    if (teamOf.has(wallet)) return teamOf.get(wallet);
+    if (seen.has(wallet)) throw new Error(`${wallet} 的计算上级成环`);
+    seen.add(wallet);
+    let sum = 0n;
+    for (const child of children.get(wallet) || []) {
+      sum += byWallet.get(child).selfWei + team(child, seen);
+    }
+    seen.delete(wallet);
+    teamOf.set(wallet, sum);
+    return sum;
+  }
+  const problems = [];
+  for (const account of accounts) {
+    const teamWei = team(account.wallet, new Set());
+    account.teamWei = teamWei;
+    account.networkWei = account.selfWei + teamWei;
+    if (account.networkWei !== account.indexedNetworkWei) {
+      const who = account.note || account.wallet;
+      problems.push(`${who} 按计算上级的业绩是 ${formatUsdt(account.networkWei)}，库里本人加伞下是 ${formatUsdt(account.indexedNetworkWei)}`);
+    }
+  }
+  return problems;
+}
+
+/**
  * Roots have no referrer. More than one root sits under a synthetic 全部 node.
  * That node's volume is the sum of each wallet's own volume, so umbrellas are not counted twice.
  */
@@ -316,6 +385,7 @@ export function buildTree(accounts) {
     networkWei: sum((account) => account.selfWei),
     directWei: sum((account) => account.directWei),
     teamRewardWei: sum((account) => account.teamRewardWei),
+    manualRewardWei: sum((account) => account.manualRewardWei ?? 0n),
     historicalTeamRewardWei: sum((account) => account.historicalTeamRewardWei),
     networkRewardWei: sum((account) => account.networkRewardWei),
     totalRewardWei: sum((account) => account.totalRewardWei),
@@ -487,7 +557,7 @@ export function flowsFromBooks({ rows, orders, payouts = [], switchUnix = null, 
       flows.push({ kind: "directClaim", block: unix, logIndex: index, unix, amountWei: amount });
     }
   }
-  return { rows: accountRows(state), flows, imported };
+  return { rows: accountRows(state), flows, imported, manualRewards: state.manualRewards };
 }
 
 /**
@@ -516,8 +586,9 @@ export function compareBooksToChain({ accounts, chainByWallet, chainTotals, orde
     }
     const onChain = chain.account;
     if (!onChain.registered) accountProblems.push(`${account.wallet} 在索引里，金库 getAccount 未注册`);
-    if (!sameAddress(onChain.referrer, account.referrer)) {
-      accountProblems.push(`${account.wallet} 金库上级 ${referrerOf(onChain.referrer) || "无"}，索引 ${account.referrer || "无"}`);
+    const indexedReferrer = account.chainReferrer === undefined ? account.referrer : account.chainReferrer;
+    if (!sameAddress(onChain.referrer, indexedReferrer)) {
+      accountProblems.push(`${account.wallet} 金库上级 ${referrerOf(onChain.referrer) || "无"}，索引 ${indexedReferrer || "无"}`);
     }
     differ(accountProblems, account.wallet, "本人业绩", account.selfWei, onChain.selfVolume);
     differ(accountProblems, account.wallet, "直推计提", account.directWei, onChain.directRewards);
@@ -548,6 +619,44 @@ export function compareBooksToChain({ accounts, chainByWallet, chainTotals, orde
     }
   }
   return { accountProblems, ledgerProblems };
+}
+
+/**
+ * Compare index and ledger sums with the contract totals.
+ * This does not read or require a per-address account.
+ */
+export function compareIndexTotals({
+  selfWei,
+  directWei,
+  teamClaimedWei,
+  orderWei,
+  payoutDirectWei = 0n,
+  payoutTeamWei = 0n,
+  chainTotals,
+}) {
+  const problems = [];
+  const warnings = [];
+  if (!chainTotals) return { problems, warnings };
+  const volume = BigInt(chainTotals.totalContributed) + BigInt(chainTotals.totalImported);
+  if (BigInt(selfWei) !== volume) {
+    problems.push(`索引本人业绩合计 ${formatUsdt(selfWei)} USDT，金库收款加导入 ${formatUsdt(volume)} USDT`);
+  }
+  if (BigInt(directWei) !== BigInt(chainTotals.totalDirectAccrued)) {
+    problems.push(`索引直推计提合计 ${formatUsdt(directWei)} USDT，金库 totalDirectAccrued ${formatUsdt(chainTotals.totalDirectAccrued)} USDT`);
+  }
+  if (BigInt(teamClaimedWei) !== BigInt(chainTotals.totalTeamPaid)) {
+    problems.push(`索引网体已领合计 ${formatUsdt(teamClaimedWei)} USDT，奖励合约 totalTeamPaid ${formatUsdt(chainTotals.totalTeamPaid)} USDT`);
+  }
+  if (BigInt(orderWei) !== BigInt(chainTotals.totalContributed)) {
+    warnings.push(`库里链上订单合计 ${formatUsdt(orderWei)} USDT，金库 totalContributed ${formatUsdt(chainTotals.totalContributed)} USDT`);
+  }
+  if (BigInt(payoutDirectWei) !== BigInt(chainTotals.totalClaimed)) {
+    warnings.push(`拨付表直推领取 ${formatUsdt(payoutDirectWei)} USDT，金库 totalClaimed ${formatUsdt(chainTotals.totalClaimed)} USDT`);
+  }
+  if (BigInt(payoutTeamWei) !== BigInt(chainTotals.totalTeamPaid)) {
+    warnings.push(`拨付表网体领取 ${formatUsdt(payoutTeamWei)} USDT，奖励合约 totalTeamPaid ${formatUsdt(chainTotals.totalTeamPaid)} USDT`);
+  }
+  return { problems, warnings };
 }
 
 /**
@@ -831,7 +940,27 @@ function embed(value) {
   return JSON.stringify(value).replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
 }
 
-const ROLE_LABEL = { team_leader: "团队长", big_leader: "大团队长" };
+const ROLE_LABEL = { team_leader: "团队长", big_leader: "内部" };
+
+/** Phase-1 admin transfers. They are not in the index and must not enter a root. */
+const PHASE1_MANUAL = new Map([
+  [getAddress("0x30718824324b8Da00C15A8034a8075258Ba90b93").toLowerCase(), [
+    { kind: "direct", amountWei: 100n * UNIT, label: "一期手动" },
+  ]],
+  [getAddress("0x3b86b370227B4d1714F36e496a26847F6d4EF4Ec").toLowerCase(), [
+    { kind: "paid", amountWei: 10n * UNIT, label: "一期手动" },
+  ]],
+  [getAddress("0x450fF060Dd6F9Ab91218A505a034a387836E27a5").toLowerCase(), [
+    { kind: "paid", amountWei: 10n * UNIT, label: "一期手动" },
+  ]],
+]);
+
+export function annotatePhase1Manual(accounts) {
+  for (const account of accounts) {
+    account.phase1Manual = PHASE1_MANUAL.get(account.wallet.toLowerCase()) || [];
+  }
+  return accounts;
+}
 
 export function annotateRewardRoles(accounts, roles, { head = 0n, v3Block = "" } = {}) {
   const v3 = blockAtLeast(head, v3Block);
@@ -842,6 +971,10 @@ export function annotateRewardRoles(accounts, roles, { head = 0n, v3Block = "" }
     account.rewardRole = role.role;
     const name = ROLE_LABEL[role.role] || role.role;
     const effective = BigInt(role.effective_block ?? role.effectiveBlock ?? 0);
+    if (role.role === "big_leader") {
+      account.roleLabel = !v3 || BigInt(head) < effective ? "内部 · 链下 9% 待生效" : "内部 · 链下 9%";
+      continue;
+    }
     if (!v3 || BigInt(head) < effective) {
       account.roleLabel = `${name} 待生效`;
       continue;
@@ -854,23 +987,6 @@ export function annotateRewardRoles(accounts, roles, { head = 0n, v3Block = "" }
     account.roleLabel = bps > 0n ? `${name} ${Number(bps) / 100}%` : name;
   }
   return accounts;
-}
-
-export function bigLeaderCandidates(accounts) {
-  const children = new Map();
-  for (const account of accounts) {
-    if (!account.referrer) continue;
-    const list = children.get(account.referrer) || [];
-    list.push(account);
-    children.set(account.referrer, list);
-  }
-  const hits = [];
-  for (const account of accounts) {
-    if (account.rewardRole === "big_leader") continue;
-    const directs = (children.get(account.wallet) || []).filter((child) => child.selfWei >= 1_000n * UNIT);
-    if (account.selfWei >= 10_000n * UNIT || (account.selfWei >= 1_000n * UNIT && directs.length >= 3)) hits.push(account.wallet);
-  }
-  return hits;
 }
 
 function depositLine(node) {
@@ -894,9 +1010,21 @@ function renderNode(node) {
     ? `<ul>${node.children.map((child) => renderNode(child)).join("")}</ul>`
     : "";
   const note = node.note ? `<span class="note">${esc(node.note)}</span>` : "";
+  const chainReferrer = node.chainReferrerLabel ? `<span class="note">${esc(node.chainReferrerLabel)}</span>` : "";
   const role = node.roleLabel ? `<span class="note">${esc(node.roleLabel)}</span>` : "";
   const down = node.children.length ? `<span class="muted">下级 ${node.children.length}</span>` : "";
-  return `<li${node.all ? ' data-all="1"' : ""} data-q="${esc(query)}"><button type="button" class="row${node.children.length ? "" : " leaf"}" title="${esc(node.wallet || "全部地址")}"><span class="mark"></span><span class="tail">${esc(tail)}</span>${note}${role}<span>${esc(depositLine(node))}</span><span>${node.all ? "全网业绩" : "业绩"} ${esc(formatUsdt(node.networkWei))}</span><span>直推 ${esc(formatUsdt(node.directWei))}</span><span>网体 ${esc(formatUsdt(node.networkRewardWei))}</span><span>合计 ${esc(formatUsdt(node.totalRewardWei))}</span>${down}</button>${kids}</li>`;
+  const manualWei = node.manualRewardWei ?? 0n;
+  const manual = manualWei > 0n ? `<span>链下 ${esc(formatUsdt(manualWei))}</span>` : "";
+  const phase1 = node.phase1Manual || [];
+  const phase1Direct = phase1.some((item) => item.kind === "direct");
+  const direct = phase1Direct && node.directWei === 0n
+    ? ""
+    : `<span>直推 ${esc(formatUsdt(node.directWei))}</span>`;
+  const phase1Lines = phase1.map((item) => {
+    const name = item.kind === "direct" ? "直推" : "拨付";
+    return `<span title="不在索引里，不进发布 root">${name} ${esc(formatUsdt(item.amountWei))}（${esc(item.label)}）</span>`;
+  }).join("");
+  return `<li${node.all ? ' data-all="1"' : ""} data-q="${esc(query)}"><button type="button" class="row${node.children.length ? "" : " leaf"}" title="${esc(node.wallet || "全部地址")}"><span class="mark"></span><span class="tail">${esc(tail)}</span>${note}${chainReferrer}${role}<span>${esc(depositLine(node))}</span><span>${node.all ? "全网业绩" : "业绩"} ${esc(formatUsdt(node.networkWei))}</span>${direct}${phase1Lines}<span>网体 ${esc(formatUsdt(node.networkRewardWei))}</span>${manual}<span>合计 ${esc(formatUsdt(node.totalRewardWei))}</span>${down}</button>${kids}</li>`;
 }
 
 /** Single HTML file. Data is embedded. Day and week charts are drawn in the page. */
@@ -913,10 +1041,17 @@ export function renderPage({
   weeks,
   review,
   snapshotName,
+  checked = false,
+  scope = "",
+  volumeMode = false,
 }) {
+  const volumeLine = volumeMode ? "业绩按计算上级重算。直推、网体和合计仍是索引里已经记下的数字。" : "节点上的数字仍用索引。";
   const status = problems.length
-    ? `<div class="bad"><b>核对没有通过，共 ${problems.length} 条。</b>页面数字仍用链上重放。${previewProblems(problems).map((line) => `<div>${esc(line)}</div>`).join("")}</div>`
-    : `<div class="ok">核对通过。每个地址的上级、本人业绩、直推计提和网体已领都和合约一致。</div>`;
+    ? `<div class="bad"><b>有 ${problems.length} 条需要看。</b>${volumeLine}${previewProblems(problems).map((line) => `<div>${esc(line)}</div>`).join("")}</div>`
+    : checked
+      ? `<div class="ok">链上合计和索引一致。没有逐个地址去对。${volumeMode ? volumeLine : ""}</div>`
+      : `<div class="ok">${volumeMode ? `只读了正式库，没有和链上核对。${volumeLine}` : "只读了正式库，没有和链上核对。节点上的数字来自索引。"}</div>`;
+  const where = scope || `截止区块 ${safeHead}`;
   const noteBox = notes.length ? `<div class="note-box">${notes.map((line) => `<div>${esc(line)}</div>`).join("")}</div>` : "";
   const tree = roots.length ? `<div id="map"><ul id="tree">${roots.map((root) => renderNode(root)).join("")}</ul></div>` : `<p>这次重放没有地址。</p>`;
   return `<!DOCTYPE html>
@@ -993,7 +1128,7 @@ li:has(> ul[hidden]) > .row .mark::before { content: "+"; }
 <body>
 <header>
 <h1>Coral 邀请树</h1>
-<p class="meta">正式库 ${esc(database)} · 只读 · 截止区块 ${esc(safeHead)} · ${esc(generatedAt)}<br>金库 ${esc(ido)} · 奖励 ${esc(rewards)}<br>快照 ${esc(snapshotName)}。地址只显示后四位，悬停可看完整地址。从左向右展开。点一下展开该节点的全部下级，再点一下全部收起。空白处可以拖动画布。</p>
+<p class="meta">正式库 ${esc(database)} · 只读 · ${esc(where)} · ${esc(generatedAt)}<br>金库 ${esc(ido)} · 奖励 ${esc(rewards)}<br>快照 ${esc(snapshotName)}。地址只显示后四位，悬停可看完整地址。从左向右展开。点一下展开该节点的全部下级，再点一下全部收起。空白处可以拖动画布。</p>
 ${status}
 ${noteBox}
 <div class="toolbar"><input id="q" type="search" placeholder="搜后四位、完整地址或备注" autocomplete="off"></div>
@@ -1071,7 +1206,7 @@ function tighten() {
     const metrics = document.createElement("span");
     metrics.className = "metrics";
     for (const span of [...row.children]) {
-      if (/^(业绩|直推|网体|合计)\s/.test(span.textContent)) metrics.append(span);
+      if (/^(业绩|直推|拨付|网体|合计)\s/.test(span.textContent)) metrics.append(span);
     }
     if (!metrics.childElementCount) continue;
     const down = [...row.children].find((span) => span.classList.contains("muted"));

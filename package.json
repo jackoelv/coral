@@ -33,6 +33,8 @@
     "ckey:batch-send": "node scripts/ckey-batch-send.mjs",
     "ckey:snapshot": "node scripts/ckey-snapshot.mjs",
     "network:snapshot": "node scripts/export-network-snapshot.mjs",
+    "network:check": "node scripts/export-network-snapshot.mjs --check",
+    "volume:split": "node scripts/split-volume-root.mjs",
     "settle:imported": "node scripts/settle-imported.mjs",
     "settle:historical-team": "node scripts/settle-historical-team.mjs",
     "rewards:migrate": "node scripts/rewards-migrate-testnet.mjs",

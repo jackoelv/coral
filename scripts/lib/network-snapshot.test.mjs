@@ -2,11 +2,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   accountsFromIndex,
+  annotatePhase1Manual,
   assembleAccounts,
   buildDailySeries,
   buildTree,
+  layoutVolumeParents,
   collectProblems,
   compareBooksToChain,
+  compareIndexTotals,
   compareOrders,
   fileStamp,
   flowsFromBooks,
@@ -106,7 +109,26 @@ test("two roots sit under 全部 and the total does not double-count umbrellas",
   assert.match(html, /2266/);
   assert.match(html, /根/);
   assert.match(html, /10-30 01:00/);
-  assert.match(html, /核对没有通过/);
+  assert.match(html, /有 1 条需要看/);
+  const quiet = renderPage({
+    generatedAt: "2026-10-30 10:00:00",
+    database: "production",
+    ido: "0xido",
+    rewards: "0xrewards",
+    safeHead: "",
+    checked: false,
+    scope: "索引检查点 10",
+    problems: [],
+    notes: [],
+    roots: tree.roots,
+    days: [],
+    weeks: [],
+    review: [],
+    snapshotName: "network-snapshot-test.json",
+  });
+  assert.match(quiet, /只读了正式库/);
+  assert.match(quiet, /索引检查点 10/);
+  assert.doesNotMatch(quiet, /每个地址/);
   assert.match(html, /id="map"/);
   assert.match(html, /function paintEdges/);
   assert.match(html, /function fullyOpen/);
@@ -172,6 +194,128 @@ test("indexed orders rebuild the same rewards and a chain mismatch is reported",
     orderWei: 1_000n * UNIT,
   });
   assert.ok(accountProblems.some((line) => line.includes("本人业绩")));
+  const totals = compareIndexTotals({
+    selfWei: 1_100n * UNIT,
+    directWei: 100n * UNIT,
+    teamClaimedWei: 70n * UNIT,
+    orderWei: 1_000n * UNIT,
+    payoutDirectWei: 90n * UNIT,
+    payoutTeamWei: 70n * UNIT,
+    chainTotals: {
+      totalContributed: 1_000n * UNIT,
+      totalImported: 100n * UNIT,
+      totalDirectAccrued: 100n * UNIT,
+      totalClaimed: 100n * UNIT,
+      totalTeamPaid: 70n * UNIT,
+    },
+  });
+  assert.deepEqual(totals.problems, []);
+  assert.equal(totals.warnings.length, 1);
+  const mismatch = compareIndexTotals({
+    selfWei: 1n,
+    directWei: 1n,
+    teamClaimedWei: 1n,
+    orderWei: 1n,
+    chainTotals: {
+      totalContributed: 2n,
+      totalImported: 0n,
+      totalDirectAccrued: 2n,
+      totalClaimed: 2n,
+      totalTeamPaid: 2n,
+    },
+  });
+  assert.equal(mismatch.problems.length, 3);
+});
+
+test("phase-1 manual payments stay on the recorded wallets", () => {
+  const blank = { deposits: [], referrer: null, importedWei: 0n, directWei: 0n, teamRewardWei: 0n, historicalTeamRewardWei: 0n, networkRewardWei: 0n, totalRewardWei: 0n, directClaimedWei: 0n, teamClaimedWei: 0n, teamWei: 0n };
+  const accounts = annotatePhase1Manual([
+    { ...blank, wallet: "0x30718824324b8Da00C15A8034a8075258Ba90b93", selfWei: 100n * UNIT, networkWei: 100n * UNIT },
+    { ...blank, wallet: "0x3b86b370227B4d1714F36e496a26847F6d4EF4Ec", note: "张姐_强子", selfWei: 1000n * UNIT, networkWei: 1000n * UNIT, historicalTeamRewardWei: 3n * UNIT, networkRewardWei: 3n * UNIT, totalRewardWei: 3n * UNIT },
+    { ...blank, wallet: "0x450fF060Dd6F9Ab91218A505a034a387836E27a5", note: "强子", selfWei: 100n * UNIT, networkWei: 100n * UNIT, directWei: 1102n * UNIT / 10n, totalRewardWei: 1102n * UNIT / 10n },
+  ]);
+  const html = renderPage({
+    generatedAt: "2026-11-08",
+    database: "production",
+    ido: "0xido",
+    rewards: "0xrewards",
+    safeHead: "",
+    problems: [],
+    notes: [],
+    roots: buildTree(accounts).roots,
+    days: [],
+    weeks: [],
+    review: [],
+    snapshotName: "t.json",
+  });
+  const card = (tail) => {
+    const start = html.indexOf(`>${tail}<`);
+    return html.slice(start, html.indexOf("</button>", start));
+  };
+  assert.match(card("0b93"), /直推 100（一期手动）/);
+  assert.doesNotMatch(card("0b93"), /拨付 10/);
+  assert.match(card("F4Ec"), /拨付 10（一期手动）/);
+  assert.match(card("F4Ec"), /直推 0/);
+  assert.match(card("F4Ec"), /合计 3/);
+  assert.doesNotMatch(card("F4Ec"), /直推 100/);
+  assert.match(card("27a5"), /直推 110\.2/);
+  assert.match(card("27a5"), /拨付 10（一期手动）/);
+});
+
+test("volume parent redraws the umbrella and keeps indexed rewards", () => {
+  const admin = "0xD25FFDaB817a1961E7c3224403d54a0182550968";
+  const qiang = "0x450fF060Dd6F9Ab91218A505a034a387836E27a5";
+  const jack = "0xB6c3CcdA14a5e3a82C3788e8c7B0Da1f217115Cb";
+  const child = "0xEE61F0fb3712f42F0BF4F3051696583a092ba224";
+  const other = "0x1111111111111111111111111111111111111111";
+  const blank = { deposits: [], importedWei: 0n, directWei: 0n, teamRewardWei: 0n, historicalTeamRewardWei: 0n, networkRewardWei: 0n, totalRewardWei: 0n, directClaimedWei: 0n, teamClaimedWei: 0n };
+  const accounts = [
+    { ...blank, wallet: admin, referrer: null, note: "Admin_OKX", selfWei: 0n, teamWei: 51831n * UNIT, networkWei: 51831n * UNIT },
+    { ...blank, wallet: qiang, referrer: admin, note: "强子", selfWei: 100n * UNIT, teamWei: 45030n * UNIT, networkWei: 45130n * UNIT, directWei: 1102n * UNIT / 10n, teamRewardWei: 113031n * UNIT / 100n, networkRewardWei: 113031n * UNIT / 100n, totalRewardWei: (1102n * UNIT / 10n) + (113031n * UNIT / 100n) },
+    { ...blank, wallet: other, referrer: qiang, selfWei: 45030n * UNIT, teamWei: 0n, networkWei: 45030n * UNIT },
+    { ...blank, wallet: jack, referrer: qiang, note: "JACK_BNB", selfWei: 501n * UNIT, teamWei: 6200n * UNIT, networkWei: 6701n * UNIT },
+    { ...blank, wallet: child, referrer: jack, note: "天祥", selfWei: 6200n * UNIT, teamWei: 0n, networkWei: 6200n * UNIT },
+  ];
+  const laid = layoutVolumeParents(accounts, [{ wallet: jack, volumeParent: admin, note: "JACK_BNB" }]);
+  assert.equal(laid.problems.length, 0);
+  assert.match(laid.notes[0], /JACK_BNB 的计算上级是 Admin_OKX，链上推荐人仍是强子/);
+  const tree = buildTree(accounts);
+  const root = tree.roots[0];
+  assert.equal(root.wallet, admin);
+  assert.deepEqual(root.children.map((node) => node.wallet).sort(), [jack, qiang].sort());
+  const qiangNode = root.children.find((node) => node.wallet === qiang);
+  assert.equal(qiangNode.networkWei, 45130n * UNIT);
+  assert.equal(qiangNode.children.some((node) => node.wallet === jack), false);
+  assert.equal(qiangNode.directWei, 1102n * UNIT / 10n);
+  assert.equal(qiangNode.teamRewardWei, 113031n * UNIT / 100n);
+  const jackNode = root.children.find((node) => node.wallet === jack);
+  assert.equal(jackNode.networkWei, 6701n * UNIT);
+  assert.equal(jackNode.chainReferrer, qiang);
+  const html = renderPage({
+    generatedAt: "2026-11-08",
+    database: "production",
+    ido: "0xido",
+    rewards: "0xrewards",
+    safeHead: "",
+    problems: [],
+    notes: laid.notes,
+    roots: tree.roots,
+    days: [],
+    weeks: [],
+    review: [],
+    snapshotName: "t.json",
+    volumeMode: true,
+  });
+  const card = (tail) => {
+    const start = html.indexOf(`>${tail}<`);
+    return html.slice(start, html.indexOf("</button>", start));
+  };
+  assert.match(card("15Cb"), /链上推荐人仍是强子/);
+  assert.match(card("15Cb"), /业绩 6,701/);
+  assert.match(card("27a5"), /业绩 45,130/);
+  assert.match(card("27a5"), /直推 110\.2/);
+  assert.match(card("27a5"), /网体 1,130\.31/);
+  assert.match(html, /业绩按计算上级重算/);
 });
 
 test("weeks sum new receipts and keep the last running total", () => {

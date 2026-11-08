@@ -9,12 +9,10 @@ export const DIRECT_BPS_V3 = 500n;
 export const MIN_SELF = 100n * UNIT;
 export const ROLE_LEADER = "team_leader";
 export const ROLE_BIG = "big_leader";
-export const BIG_SELF_MIN = 1_000n * UNIT;
-export const BIG_SELF_BPS = 800n;
+/** Extra 9% for an internal address. Kept off teamRewards so it never enters publishRoot. */
+export const MANUAL_BPS = 900n;
 /** Team-leader peer bonus needs this much self + umbrella, even after the 14% tier. Edit this number. */
 export const LEADER_PEER_QUAL = 60_000n * UNIT;
-/** Big-leader peer bonus needs this much self + umbrella. The 8/11/14% differential is unchanged. Edit this number. */
-export const BIG_PEER_QUAL = 500_000n * UNIT;
 
 export const TIERS = [
   [500n * UNIT, 300n],
@@ -39,12 +37,6 @@ export const TIERS_V3_PUBLIC = [
 
 export const TIERS_V3_LEADER = [
   [1_000n * UNIT, 800n],
-  [3_000n * UNIT, 1_100n],
-  [6_000n * UNIT, 1_400n],
-];
-
-/** Qual thresholds above the self floor. The 8% step is self volume, not this table. */
-export const TIERS_V3_BIG = [
   [3_000n * UNIT, 1_100n],
   [6_000n * UNIT, 1_400n],
 ];
@@ -111,7 +103,9 @@ export function createState() {
     self: new Map(),
     team: new Map(),
     referrer: new Map(),
+    volumeParent: new Map(),
     teamRewards: new Map(),
+    manualRewards: new Map(),
     direct: new Map(),
     roles: new Map(),
     directBpsProblems: [],
@@ -124,6 +118,17 @@ function get(map, key) {
 
 export function bind(state, account, referrer) {
   state.referrer.set(account, referrer || null);
+}
+
+/** Volume walks use this parent when it is set. Direct rewards keep the chain referrer. */
+export function setVolumeParent(state, account, parent) {
+  if (!state.volumeParent) state.volumeParent = new Map();
+  state.volumeParent.set(account, parent || null);
+}
+
+export function upline(state, account) {
+  if (state.volumeParent?.has(account)) return state.volumeParent.get(account) || null;
+  return state.referrer.get(account) || null;
 }
 
 export function setRole(state, account, role, effectiveBlock = null, effectiveUnix = null) {
@@ -157,18 +162,12 @@ export function bpsForAccount(state, account, opts = {}) {
   const qual = self + get(state.team, account);
   if (!opts.v3) return bpsForQual(qual, opts.tiers ?? TIERS);
   const role = roleAt(state, account, opts);
-  if (role === ROLE_BIG) {
-    const floor = self >= BIG_SELF_MIN ? BIG_SELF_BPS : 0n;
-    const qualRate = bpsForQual(qual, TIERS_V3_BIG);
-    return qualRate > floor ? qualRate : floor;
-  }
   if (role === ROLE_LEADER) return bpsForQual(qual, TIERS_V3_LEADER);
   return bpsForQual(qual, TIERS_V3_PUBLIC);
 }
 
 /** Volume required before this account's differential can pay a peer bonus to the next same-rate upline. */
 export function peerQualMin(role) {
-  if (role === ROLE_BIG) return BIG_PEER_QUAL;
   if (role === ROLE_LEADER) return LEADER_PEER_QUAL;
   return TIERS_V3_PUBLIC[TIERS_V3_PUBLIC.length - 1][0];
 }
@@ -194,12 +193,15 @@ export function noteImportedSelf(state, account, absoluteSelf) {
   state.self.set(account, next);
   const delta = next - prev;
   if (delta === 0n) return;
-  let cursor = state.referrer.get(account) || null;
+  let cursor = upline(state, account);
+  const seen = new Set();
   while (cursor) {
+    if (seen.has(cursor)) throw new Error(`${cursor} 的计算上级成环`);
+    seen.add(cursor);
     const team = get(state.team, cursor) + delta;
     if (team < 0n) throw new Error(`${cursor} 的伞下业绩不能为负`);
     state.team.set(cursor, team);
-    cursor = state.referrer.get(cursor) || null;
+    cursor = upline(state, cursor);
   }
 }
 
@@ -212,12 +214,15 @@ function payTeam(state, account, reward, deltas, kind) {
 function walkClassic(state, ref, amount, tiers, minSelf) {
   let prev = 0n;
   let cursor = ref;
+  const seen = new Set();
   let dNode = null;
   let dTeam = 0n;
   let overlayAncestor = null;
   const deltas = [];
 
   while (cursor) {
+    if (seen.has(cursor)) throw new Error(`${cursor} 的计算上级成环`);
+    seen.add(cursor);
     const self = get(state.self, cursor);
     const qual = self + get(state.team, cursor);
     const rate = self >= minSelf ? bpsForQual(qual, tiers) : 0n;
@@ -236,7 +241,7 @@ function walkClassic(state, ref, amount, tiers, minSelf) {
       }
     }
     state.team.set(cursor, get(state.team, cursor) + amount);
-    cursor = state.referrer.get(cursor) || null;
+    cursor = upline(state, cursor);
   }
 
   let overlay = 0n;
@@ -252,8 +257,11 @@ function walkV3(state, ref, amount, opts) {
   let established = 0n;
   let overlayOpen = false;
   const deltas = [];
+  const seen = new Set();
   let cursor = ref;
   while (cursor) {
+    if (seen.has(cursor)) throw new Error(`${cursor} 的计算上级成环`);
+    seen.add(cursor);
     const rate = bpsForAccount(state, cursor, opts);
     if (rate > prev) {
       const reward = (amount * (rate - prev)) / BPS;
@@ -268,7 +276,7 @@ function walkV3(state, ref, amount, opts) {
       overlayOpen = false;
     }
     state.team.set(cursor, get(state.team, cursor) + amount);
-    cursor = state.referrer.get(cursor) || null;
+    cursor = upline(state, cursor);
   }
   const overlays = deltas.filter((row) => row.kind === "overlay");
   const overlay = overlays.reduce((sum, row) => sum + row.amount, 0n);
@@ -286,19 +294,43 @@ export function contribute(state, account, amount, opts = {}) {
   const tiers = opts.tiers ?? TIERS;
   state.self.set(account, get(state.self, account) + amount);
 
-  const ref = state.referrer.get(account) || null;
+  const chainRef = state.referrer.get(account) || null;
   let directPaid = 0n;
-  if (ref && get(state.self, ref) >= minSelf) {
+  if (chainRef && get(state.self, chainRef) >= minSelf) {
     directPaid = (amount * directBps) / BPS;
-    if (directPaid > 0n) state.direct.set(ref, get(state.direct, ref) + directPaid);
+    if (directPaid > 0n) state.direct.set(chainRef, get(state.direct, chainRef) + directPaid);
   }
 
-  const walked = v3 ? walkV3(state, ref, amount, { ...opts, v3: true, minSelf }) : walkClassic(state, ref, amount, tiers, minSelf);
-  return { directTo: ref, directPaid, ...walked };
+  const volumeRef = upline(state, account);
+  const walked = v3 ? walkV3(state, volumeRef, amount, { ...opts, v3: true, minSelf }) : walkClassic(state, volumeRef, amount, tiers, minSelf);
+  const manual = v3 ? accrueManual(state, volumeRef, amount, opts) : null;
+  return { directTo: chainRef, directPaid, manual, ...walked };
+}
+
+/** Nearest effective internal ancestor. One 9% of this deposit, not stacked, and not part of the differential. */
+function accrueManual(state, ref, amount, opts) {
+  if (!state.manualRewards) state.manualRewards = new Map();
+  let cursor = ref;
+  const seen = new Set();
+  while (cursor) {
+    if (seen.has(cursor)) throw new Error(`${cursor} 的计算上级成环`);
+    seen.add(cursor);
+    if (roleAt(state, cursor, opts) === ROLE_BIG) {
+      const reward = (amount * MANUAL_BPS) / BPS;
+      if (reward > 0n) state.manualRewards.set(cursor, get(state.manualRewards, cursor) + reward);
+      return reward > 0n ? { account: cursor, amount: reward } : null;
+    }
+    cursor = upline(state, cursor);
+  }
+  return null;
 }
 
 export function teamOf(state, account) {
   return get(state.teamRewards, account);
+}
+
+export function manualOf(state, account) {
+  return get(state.manualRewards, account);
 }
 
 export function directOf(state, account) {
